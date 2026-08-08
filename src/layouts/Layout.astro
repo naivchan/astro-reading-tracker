@@ -1,5 +1,9 @@
 ---
 // src/layouts/Layout.astro
+
+// Force Vite to bundle all book JSON files into the build graph
+const bookModules = import.meta.glob('../data/books/*.json', { eager: true });
+
 interface Props {
   title: string;
 }
