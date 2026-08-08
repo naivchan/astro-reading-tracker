@@ -1,0 +1,181 @@
+---
+// src/components/Calendar.astro
+import type { Book } from '../lib/storage';
+
+interface Props {
+  books: Book[];
+  selectedBookId?: string;
+  year: number;
+  month: number; // 0-indexed (0 = Jan, 7 = Aug)
+}
+
+const { books, selectedBookId = 'all', year, month } = Astro.props;
+
+// Filter dataset based on book selection for calendar entries
+const targetBooks = selectedBookId === 'all' 
+  ? books 
+  : books.filter((b) => b.id === selectedBookId);
+
+// Calculate month boundaries
+const daysInMonth = new Date(year, month + 1, 0).getDate();
+const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7; // Monday start (0)
+
+// High-contrast distinct palette ordered to ensure similar hues never sit adjacent
+const palette = [
+  '#38bdf8', // Light Sky Blue
+  '#f43f5e', // Vibrant Rose/Red
+  '#10b981', // Emerald Green
+  '#8b5cf6', // Purple
+  '#f97316', // Bright Orange
+  '#06b6d4', // Cyan
+  '#eab308', // Yellow
+  '#ec4899', // Pink
+  '#22c55e', // Green
+  '#6366f1', // Indigo
+  '#d946ef', // Fuchsia
+  '#14b8a6', // Teal
+  '#f43f5e', // Red
+  '#0ea5e9', // Blue
+  '#84cc16', // Lime
+  '#a855f7', // Violet
+  '#fb923c', // Amber-Orange
+  '#3b82f6', // Royal Blue
+  '#4ade80', // Mint
+  '#f472b6'  // Light Pink
+];
+
+// Map against the FULL `books` array ensuring adjacent indexes never share similar tones
+const bookColorMap: Record<string, string> = {};
+books.forEach((b, idx) => {
+  bookColorMap[b.id] = palette[idx % palette.length];
+});
+
+const calendarDays = Array.from({ length: daysInMonth }, (_, i) => {
+  const dayNum = i + 1;
+  const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+
+  let pagesRead = 0;
+  const booksReadOnDay: { id: string; title: string; pages: number; color: string }[] = [];
+
+  targetBooks.forEach((b) => {
+    const log = b.logs?.find((l) => l.date === dateStr);
+    if (log && log.pagesRead > 0) {
+      pagesRead += log.pagesRead;
+      booksReadOnDay.push({
+        id: b.id,
+        title: b.title,
+        pages: log.pagesRead,
+        color: bookColorMap[b.id] || '#38bdf8'
+      });
+    }
+  });
+
+  const startedBooks = targetBooks.filter((b) => b.dateStarted === dateStr);
+  const finishedBooks = targetBooks.filter((b) => b.dateFinished === dateStr);
+  const dnfBooks = targetBooks.filter((b) => b.status === 'DNF' && b.dateFinished === dateStr);
+  
+  const hasReading = pagesRead > 0;
+
+  return { dayNum, dateStr, pagesRead, booksReadOnDay, startedBooks, finishedBooks, dnfBooks, hasReading };
+});
+
+const maxPages = Math.max(...calendarDays.map((d) => d.pagesRead), 1);
+---
+
+<div class="calendar-wrapper">
+  <div class="calendar-grid">
+    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+      <div class="day-header">{d}</div>
+    ))}
+
+    <!-- Empty padding days -->
+    {Array.from({ length: firstDayIndex }).map(() => <div class="day-cell empty" />)}
+
+    {calendarDays.map((day) => (
+      <div 
+        class={`day-cell ${day.hasReading ? 'has-activity' : ''}`}
+        data-date={day.dateStr}
+        onclick="handleCalendarDayClick(this)"
+      >
+        <div class="cell-top-row">
+          <span class="day-number">{day.dayNum}</span>
+          
+          <!-- Finished / DNF Badges -->
+          <div class="status-markers">
+            {day.finishedBooks.map((book) => (
+              <span class="marker finished" title={`Finished: ${book.title}`}>🏁</span>
+            ))}
+            {day.dnfBooks.map((book) => (
+              <span class="marker dnf" title={`DNF: ${book.title}`}>🛑</span>
+            ))}
+          </div>
+        </div>
+
+        <!-- Vertical Stack of Continuous Reading Lines -->
+        {day.hasReading && (
+          <div class="reading-streak-container">
+            {day.booksReadOnDay.map((item) => (
+              <div 
+                class="reading-streak-line" 
+                style={`background-color: ${item.color};`} 
+                title={`${item.title}: ${item.pages} pages`}
+              />
+            ))}
+          </div>
+        )}
+
+        <!-- Book Covers for Start Dates (with matching border colors) -->
+        <div class="started-covers">
+          {day.startedBooks.map((book) => (
+            <img 
+              src={book.coverUrl} 
+              alt={book.title} 
+              title={`Started: ${book.title}`} 
+              class="calendar-cover" 
+              style={`border-color: ${bookColorMap[book.id] || '#38bdf8'};`}
+            />
+          ))}
+        </div>
+
+        <!-- Daily Page Counter Badge -->
+        {day.pagesRead > 0 && (
+          <div class="day-stats">
+            {day.pagesRead === maxPages && selectedBookId === 'all' ? '🏆' : '📖'} {day.pagesRead}
+          </div>
+        )}
+      </div>
+    ))}
+  </div>
+</div>
+
+<script is:inline>
+  function handleCalendarDayClick(cell) {
+    if (typeof openEditModalFromCalendar === 'function') {
+      openEditModalFromCalendar(cell.dataset.date);
+    }
+  }
+</script>
+
+<style>
+  .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background: #fff; margin-top: 0.5rem; }
+  .day-header { background: #f8fafc; text-align: center; font-weight: 600; padding: 0.5rem; font-size: 0.8rem; border-bottom: 1px solid #cbd5e1; color: #475569; }
+  
+  .day-cell { min-height: 90px; border: 1px solid #f1f5f9; padding: 0.25rem; position: relative; display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; transition: background 0.15s ease; }
+  .day-cell:hover { background: #f0f9ff; }
+  .day-cell.empty { background: #f8fafc; cursor: default; }
+  
+  .cell-top-row { display: flex; justify-content: space-between; align-items: center; z-index: 2; }
+  .day-number { font-size: 0.75rem; font-weight: 600; color: #64748b; }
+  
+  .status-markers { display: flex; gap: 2px; font-size: 0.65rem; }
+  .marker { cursor: help; }
+
+  /* Vertical stack of continuous lines */
+  .reading-streak-container { position: absolute; top: 40%; left: 0; right: 0; display: flex; flex-direction: column; gap: 2px; z-index: 1; opacity: 0.9; }
+  .reading-streak-line { width: 100%; height: 4px; border-radius: 2px; }
+  
+  .started-covers { display: flex; gap: 2px; z-index: 2; justify-content: center; }
+  .calendar-cover { width: 34px; height: 50px; object-fit: cover; border-radius: 3px; border-width: 2.5px; border-style: solid; box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
+  
+  .day-stats { font-size: 0.7rem; font-weight: 700; color: #0369a1; z-index: 2; background: rgba(255,255,255,0.9); padding: 1px 4px; border-radius: 3px; align-self: flex-end; }
+</style>

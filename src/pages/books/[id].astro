@@ -1,0 +1,477 @@
+---
+// src/pages/books/[id].astro
+export const prerender = false;
+
+import Layout from '../../layouts/Layout.astro';
+import Calendar from '../../components/Calendar.astro';
+import { getAllBooks, getBook } from '../../lib/storage';
+
+const { id } = Astro.params;
+const book = await getBook(id || '');
+
+if (!book) {
+  return Astro.redirect('/books');
+}
+
+const allBooks = await getAllBooks();
+
+const bookPeriodsSet = new Set<string>();
+book.logs?.forEach((l) => {
+  if (l.date && l.date.length >= 7) bookPeriodsSet.add(l.date.slice(0, 7));
+});
+if (book.dateStarted && book.dateStarted.length >= 7) bookPeriodsSet.add(book.dateStarted.slice(0, 7));
+if (book.dateFinished && book.dateFinished.length >= 7) bookPeriodsSet.add(book.dateFinished.slice(0, 7));
+
+const activePeriods = Array.from(bookPeriodsSet).sort();
+
+const formatPeriodLabel = (periodStr: string) => {
+  const [y, m] = periodStr.split('-').map(Number);
+  const date = new Date(y, m - 1, 1);
+  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+};
+
+const totalPagesRead = book.logs?.reduce((sum, l) => sum + l.pagesRead, 0) || 0;
+---
+
+<Layout title={`${book.title} - Book Details`}>
+  <main class="book-detail-container">
+    <!-- Password Authentication Gate Modal -->
+    <div id="authModal" class="modal-overlay" style="display: none;">
+      <div class="modal-card">
+        <h2>🔐 Admin Authentication Required</h2>
+        <p id="authMessage">Please enter your admin password to proceed.</p>
+        <form id="authForm">
+          <label>Password
+            <input type="password" id="adminPasswordInput" placeholder="Enter password" required />
+          </label>
+          <div class="modal-actions">
+            <button type="submit" class="btn">Unlock</button>
+            <button type="button" id="cancelAuthBtn" class="btn secondary">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Edit Book Modal -->
+    <div id="editBookModal" class="modal-overlay" style="display: none;">
+      <div class="modal-card modal-large">
+        <h2>Edit Book: {book.title}</h2>
+        <form id="editBookForm" class="edit-fields-grid">
+          <label>Title <input type="text" id="editTitle" value={book.title} required /></label>
+          <label>Author <input type="text" id="editAuthor" value={book.author} required /></label>
+
+          <div class="form-row">
+            <label>Series <input type="text" id="editSeries" value={book.series || ''} placeholder="e.g. Mistborn" /></label>
+            <label>Series Number <input type="number" id="editSeriesNumber" value={book.seriesNumber !== undefined ? book.seriesNumber : ''} min="0" step="0.5" placeholder="1" /></label>
+          </div>
+
+          <div class="form-row">
+            <label>Format
+              <select id="editFormat">
+                <option value="Ebook" selected={book.format === 'Ebook'}>Ebook</option>
+                <option value="Physical" selected={book.format === 'Physical'}>Physical</option>
+                <option value="Audiobook" selected={book.format === 'Audiobook'}>Audiobook</option>
+              </select>
+            </label>
+            <label>Status
+              <select id="editStatus">
+                <option value="Reading" selected={book.status === 'Reading'}>Reading</option>
+                <option value="Finished" selected={book.status === 'Finished'}>Finished</option>
+                <option value="DNF" selected={book.status === 'DNF'}>DNF</option>
+                <option value="To Read" selected={book.status === 'To Read'}>To Read</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="form-row">
+            <label>Current Page <input type="number" id="editCurrentPage" value={book.currentPage !== undefined ? book.currentPage : ''} min="0" placeholder="0" /></label>
+            <label>Total Pages <input type="number" id="editTotalPages" value={book.totalPages !== undefined ? book.totalPages : ''} min="1" placeholder="350" /></label>
+          </div>
+
+          <div class="form-row">
+            <label>Date Started <input type="date" id="editDateStarted" value={book.dateStarted || ''} /></label>
+            <label>Date Finished <input type="date" id="editDateFinished" value={book.dateFinished || ''} /></label>
+          </div>
+
+          <div class="form-row">
+            <label>Rating (1-5 stars) <input type="number" id="editRating" value={book.rating !== undefined && book.rating !== null ? book.rating : ''} min="1" max="5" step="0.5" placeholder="4.5" /></label>
+            <label>ISBN-13 <input type="text" id="editIsbn" value={book.isbn || ''} placeholder="ISBN..." /></label>
+          </div>
+
+          <label>Cover Image URL <input type="url" id="editCoverUrl" value={book.coverUrl || ''} placeholder="https://..." /></label>
+          <label>Review URL (Blog Link) <input type="url" id="editReviewUrl" value={book.reviewUrl || ''} placeholder="https://..." /></label>
+
+          <div class="modal-actions">
+            <button type="submit" class="btn">Save Changes</button>
+            <button type="button" id="cancelEditBtn" class="btn secondary">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Add/Edit Progress Log Modal -->
+    <div id="editLogModal" class="modal-overlay" style="display: none;">
+      <div class="modal-card">
+        <h3 id="modalLogTitle">Log Reading Progress</h3>
+        <form id="editLogForm" class="edit-fields-grid">
+          <label for="modalDateInput">Date:
+            <input type="date" id="modalDateInput" required />
+          </label>
+          
+          <div class="form-row">
+            <label>Pages Read Today <input type="number" id="modalPagesInput" min="0" placeholder="e.g. 25" /></label>
+            <label>Or Current Page <input type="number" id="modalCurrentPageInput" min="0" placeholder="e.g. 150" /></label>
+          </div>
+
+          <label>Or Percentage Complete (%) <input type="number" id="modalPercentageInput" min="0" max="100" step="0.1" placeholder="45" /></label>
+
+          <div class="modal-actions">
+            <button type="submit" class="btn">Save Log</button>
+            <button type="button" id="cancelLogBtn" class="btn secondary">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <nav class="breadcrumb-row">
+      <a href="/books">← Back to Bookshelf Index</a>
+      <div class="action-buttons-group">
+        <button id="openLogModalBtn" class="btn-sm btn-secondary">+ Add Log</button>
+        <button id="openEditModalBtn" class="btn-edit-trigger">✏️ Edit Book</button>
+      </div>
+    </nav>
+
+    <div class="card book-header-card">
+      <img src={book.coverUrl} alt={book.title} class="detail-cover" />
+      <div class="detail-meta">
+        <h1>{book.title}</h1>
+        
+        <p class="author">
+          by <a href={`/books/author/${encodeURIComponent(book.author)}`}>{book.author}</a>
+        </p>
+        
+        <div class="badges-row">
+          <span class={`badge ${book.status.toLowerCase().replace(' ', '-')}`}>{book.status}</span>
+          <span class="badge format">{book.format || 'Ebook'}</span>
+          {book.rating && <span class="badge rating">⭐ {book.rating} / 5</span>}
+          {book.series && (
+            <a href={`/books/series/${encodeURIComponent(book.series)}`} class="badge series">
+              📚 {book.series} {book.seriesNumber !== undefined ? `#${book.seriesNumber}` : ''}
+            </a>
+          )}
+        </div>
+
+        <div class="stats-summary">
+          <p><strong>Total Pages Read:</strong> {totalPagesRead} {book.totalPages ? `/ ${book.totalPages}` : ''}</p>
+          {book.dateStarted && <p><strong>Started:</strong> {book.dateStarted}</p>}
+          {book.dateFinished && <p><strong>Finished:</strong> {book.dateFinished}</p>}
+        </div>
+
+        {book.reviewUrl && (
+          <div class="review-link-container">
+            <a href={book.reviewUrl} target="_blank" rel="noopener noreferrer" class="btn-primary review-btn">
+              🔗 Read Blog Review
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <section class="book-calendars-section">
+      <h2>📅 Reading Calendars Across Active Months</h2>
+      {activePeriods.length > 0 ? (
+        activePeriods.map((period) => {
+          const [year, monthNum] = period.split('-').map(Number);
+          return (
+            <div class="card period-calendar-card">
+              <h3>{formatPeriodLabel(period)}</h3>
+              <Calendar 
+                books={allBooks} 
+                year={year} 
+                month={monthNum - 1} 
+                selectedBookId={book.id} 
+              />
+            </div>
+          );
+        })
+      ) : (
+        <p class="empty-msg">No calendar periods recorded for this book yet.</p>
+      )}
+    </section>
+  </main>
+</Layout>
+
+<script define:vars={{ bookId: book.id }}>
+  // Helper to ensure dates evaluate using local time instead of UTC roll-over
+  function getLocalToday() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  const authModal = document.getElementById('authModal');
+  const editBookModal = document.getElementById('editBookModal');
+  const editLogModal = document.getElementById('editLogModal');
+  
+  const openEditModalBtn = document.getElementById('openEditModalBtn');
+  const openLogModalBtn = document.getElementById('openLogModalBtn');
+  
+  const cancelEditBtn = document.getElementById('cancelEditBtn');
+  const cancelLogBtn = document.getElementById('cancelLogBtn');
+  const cancelAuthBtn = document.getElementById('cancelAuthBtn');
+  
+  const authForm = document.getElementById('authForm');
+  const editBookForm = document.getElementById('editBookForm');
+  const editLogForm = document.getElementById('editLogForm');
+  
+  const authMessage = document.getElementById('authMessage');
+
+  let pendingAction = null;
+
+  async function verifyAdminPassword(pwd) {
+    if (!pwd) return false;
+    const testRes = await fetch('/api/log-edit', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Admin-Password': pwd 
+      },
+      body: JSON.stringify({ bookId: 'test-ping' })
+    });
+    return testRes.status !== 401;
+  }
+
+  async function handleProtectedAction(actionType) {
+    pendingAction = actionType;
+    const pwd = localStorage.getItem('admin_password') || '';
+    const isValid = await verifyAdminPassword(pwd);
+    
+    if (isValid) {
+      if (actionType === 'edit') editBookModal.style.display = 'flex';
+      if (actionType === 'log') {
+        document.getElementById('modalDateInput').value = getLocalToday();
+        editLogModal.style.display = 'flex';
+      }
+    } else {
+      localStorage.removeItem('admin_password');
+      authMessage.textContent = actionType === 'edit' 
+        ? 'Please enter your admin password to edit this book.' 
+        : 'Please enter your admin password to log reading progress.';
+      authModal.style.display = 'flex';
+    }
+  }
+
+  openEditModalBtn?.addEventListener('click', () => handleProtectedAction('edit'));
+  openLogModalBtn?.addEventListener('click', () => handleProtectedAction('log'));
+
+  cancelEditBtn?.addEventListener('click', () => editBookModal.style.display = 'none');
+  cancelLogBtn?.addEventListener('click', () => editLogModal.style.display = 'none');
+  cancelAuthBtn?.addEventListener('click', () => authModal.style.display = 'none');
+
+  authForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const pwd = document.getElementById('adminPasswordInput').value;
+    const isValid = await verifyAdminPassword(pwd);
+    if (isValid) {
+      localStorage.setItem('admin_password', pwd);
+      authModal.style.display = 'none';
+      if (pendingAction === 'edit') editBookModal.style.display = 'flex';
+      if (pendingAction === 'log') {
+        document.getElementById('modalDateInput').value = getLocalToday();
+        editLogModal.style.display = 'flex';
+      }
+    } else {
+      alert('Invalid admin password.');
+    }
+  });
+
+  editBookForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const submitBtn = editBookForm.querySelector('button[type="submit"]');
+    const originalBtnText = submitBtn.textContent;
+    submitBtn.textContent = 'Saving changes...';
+    submitBtn.disabled = true;
+
+    const title = document.getElementById('editTitle').value;
+    const author = document.getElementById('editAuthor').value;
+    const series = document.getElementById('editSeries').value;
+    const seriesNumber = document.getElementById('editSeriesNumber').value;
+    const format = document.getElementById('editFormat').value;
+    const status = document.getElementById('editStatus').value;
+    const currentPage = document.getElementById('editCurrentPage').value;
+    const totalPages = document.getElementById('editTotalPages').value;
+    const dateStarted = document.getElementById('editDateStarted').value;
+    const dateFinished = document.getElementById('editDateFinished').value;
+    const rating = document.getElementById('editRating').value;
+    const isbn = document.getElementById('editIsbn').value;
+    const coverUrl = document.getElementById('editCoverUrl').value;
+    const reviewUrl = document.getElementById('editReviewUrl').value;
+
+    const adminPassword = localStorage.getItem('admin_password') || '';
+
+    try {
+      const res = await fetch('/api/book-edit', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Admin-Password': adminPassword
+        },
+        body: JSON.stringify({ 
+          id: bookId, 
+          title, 
+          author, 
+          series: series ? series.trim() : undefined,
+          seriesNumber: seriesNumber !== '' ? Number(seriesNumber) : undefined,
+          format,
+          status,
+          currentPage: currentPage !== '' ? Number(currentPage) : undefined,
+          totalPages: totalPages !== '' ? Number(totalPages) : undefined,
+          dateStarted: dateStarted || undefined,
+          dateFinished: dateFinished || undefined,
+          rating: rating !== '' ? Number(rating) : undefined,
+          isbn: isbn || '',
+          coverUrl, 
+          reviewUrl 
+        })
+      });
+
+      if (res.ok) {
+        window.location.reload();
+      } else if (res.status === 401) {
+        alert('Unauthorized. Please check your admin password.');
+        localStorage.removeItem('admin_password');
+        editBookModal.style.display = 'none';
+        authModal.style.display = 'flex';
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Failed to update book: ${errData.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      alert('Network error while saving changes.');
+    } finally {
+      submitBtn.textContent = originalBtnText;
+      submitBtn.disabled = false;
+    }
+  });
+
+  editLogForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const submitBtn = editLogForm.querySelector('button[type="submit"]');
+    const originalBtnText = submitBtn.textContent;
+    submitBtn.textContent = 'Saving log...';
+    submitBtn.disabled = true;
+
+    const date = document.getElementById('modalDateInput').value || getLocalToday();
+    const pagesRead = document.getElementById('modalPagesInput').value;
+    const currentPage = document.getElementById('modalCurrentPageInput').value;
+    const percentage = document.getElementById('modalPercentageInput').value;
+    const adminPassword = localStorage.getItem('admin_password') || '';
+
+    try {
+      const res = await fetch('/api/log-edit', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Admin-Password': adminPassword
+        },
+        body: JSON.stringify({ 
+          bookId, 
+          date, 
+          pagesRead: pagesRead ? Number(pagesRead) : 0, 
+          currentPage: currentPage !== '' ? Number(currentPage) : undefined, 
+          percentage: percentage !== '' ? Number(percentage) : undefined 
+        })
+      });
+
+      if (res.ok) {
+        window.location.reload();
+      } else if (res.status === 401) {
+        alert('Unauthorized. Please check your admin password.');
+        localStorage.removeItem('admin_password');
+        editLogModal.style.display = 'none';
+        authModal.style.display = 'flex';
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Failed to save progress log: ${errData.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      alert('Network error while saving progress.');
+    } finally {
+      submitBtn.textContent = originalBtnText;
+      submitBtn.disabled = false;
+    }
+  });
+</script>
+
+<style>
+  .book-detail-container { max-width: 800px; margin: 0 auto; padding: 2rem 1rem 3rem; }
+  .breadcrumb-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }
+  .breadcrumb-row a { color: var(--primary); text-decoration: none; font-weight: 500; font-size: 0.9rem; }
+  .breadcrumb-row a:hover { text-decoration: underline; }
+
+  .action-buttons-group { display: flex; gap: 0.5rem; align-items: center; }
+  .btn-edit-trigger { background: var(--text); color: var(--bg); border: none; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+  .btn-edit-trigger:hover { opacity: 0.85; }
+  .btn-sm { padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; border: 1px solid var(--border); }
+  .btn-secondary { background: var(--border); color: var(--text); }
+  .btn-secondary:hover { opacity: 0.85; }
+
+  /* Modal Styling */
+  .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 1rem; }
+  .modal-card { background: var(--card-bg); color: var(--text); padding: 1.5rem; border-radius: 8px; width: 100%; max-width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); border: 1px solid var(--border); }
+  .modal-card.modal-large { max-width: 600px; max-height: 90vh; overflow-y: auto; }
+  .modal-card h2, .modal-card h3 { margin-bottom: 1rem; font-size: 1.2rem; color: var(--text); }
+  .edit-fields-grid { display: flex; flex-direction: column; gap: 0.5rem; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .modal-actions { display: flex; gap: 1rem; margin-top: 1rem; }
+  
+  label { display: block; margin-bottom: 0.75rem; font-weight: 600; font-size: 0.85rem; color: var(--text); opacity: 0.9; }
+  input, select { width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 6px; font-size: 0.9rem; box-sizing: border-box; }
+  
+  .btn { width: 100%; padding: 0.6rem; background: var(--primary); color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+  .btn:hover { opacity: 0.9; }
+  .btn.secondary { background: var(--border); color: var(--text); }
+  .btn.secondary:hover { opacity: 0.85; }
+
+  .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.03); }
+  
+  .book-header-card { display: flex; gap: 2rem; align-items: flex-start; }
+  .detail-cover { width: 150px; height: 225px; object-fit: cover; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); flex-shrink: 0; }
+  .detail-meta { flex: 1; }
+  .detail-meta h1 { font-size: 1.5rem; margin: 0 0 0.25rem; color: var(--heading-text); line-height: 1.2; }
+  
+  .detail-meta .author { font-size: 1rem; color: var(--text); opacity: 0.7; margin: 0 0 1rem; }
+  .detail-meta .author a { color: var(--primary); text-decoration: none; font-weight: 500; }
+  .detail-meta .author a:hover { text-decoration: underline; }
+
+  .badges-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+  .badge { font-size: 0.75rem; font-weight: bold; padding: 3px 8px; border-radius: 4px; background: var(--border); color: var(--text); text-decoration: none; }
+  .badge.reading { background: #e0f2fe; color: #0369a1; }
+  .badge.finished { background: #dcfce7; color: #15803d; }
+  .badge.dnf { background: #fee2e2; color: #991b1b; }
+  .badge.rating { background: #fef9c3; color: #a16207; }
+  .badge.series { background: #f3e8ff; color: #7e22ce; border: 1px solid #e9d5ff; }
+  .badge.series:hover { opacity: 0.9; }
+
+  .stats-summary { font-size: 0.85rem; color: var(--text); opacity: 0.9; display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 1.25rem; }
+  
+  .review-link-container { margin-top: 1rem; }
+  .review-btn { display: inline-block; padding: 0.5rem 1rem; background: var(--primary); color: white; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600; }
+  .review-btn:hover { opacity: 0.9; }
+
+  .book-calendars-section { margin-top: 2rem; }
+  .book-calendars-section h2 { font-size: 1.2rem; margin-bottom: 1rem; color: var(--heading-text); }
+  .period-calendar-card { margin-bottom: 1.5rem; }
+  .period-calendar-card h3 { font-size: 1rem; color: var(--text); opacity: 0.8; margin-bottom: 0.75rem; font-weight: 600; }
+  .empty-msg { color: var(--text); opacity: 0.7; font-style: italic; }
+
+  @media (max-width: 600px) {
+    .book-header-card { flex-direction: column; align-items: center; text-align: center; }
+    .badges-row, .stats-summary { align-items: center; justify-content: center; }
+    .detail-cover { width: 130px; height: 195px; }
+  }
+</style>

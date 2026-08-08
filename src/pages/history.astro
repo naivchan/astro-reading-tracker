@@ -1,0 +1,826 @@
+---
+// src/pages/history.astro
+export const prerender = false;
+
+import Layout from '../layouts/Layout.astro';
+import Calendar from '../components/Calendar.astro';
+import { getAllBooks } from '../lib/storage';
+
+const books = await getAllBooks();
+
+// 1. Extract all unique YYYY-MM periods from reading logs & finished dates
+const periodsSet = new Set<string>();
+
+const now = new Date();
+const currentPeriodDefault = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+periodsSet.add(currentPeriodDefault);
+
+books.forEach((b) => {
+  b.logs?.forEach((l) => {
+    if (l.date && l.date.length >= 7) {
+      periodsSet.add(l.date.slice(0, 7));
+    }
+  });
+  if (b.dateStarted && b.dateStarted.length >= 7) {
+    periodsSet.add(b.dateStarted.slice(0, 7));
+  }
+  if (b.dateFinished && b.dateFinished.length >= 7) {
+    periodsSet.add(b.dateFinished.slice(0, 7));
+  }
+});
+
+const availablePeriods = Array.from(periodsSet).sort().reverse();
+
+const formatPeriodLabel = (periodStr: string) => {
+  const [y, m] = periodStr.split('-').map(Number);
+  const date = new Date(y, m - 1, 1);
+  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+};
+
+// 2. Extract query parameters (Period filter & selected book filter)
+const url = new URL(Astro.request.url);
+const period = url.searchParams.get('period') || availablePeriods[0] || currentPeriodDefault;
+const selectedBookId = url.searchParams.get('bookId') || 'all';
+
+// Parse Year and Month index (0-indexed) for Calendar component
+const [year, monthNum] = period.split('-').map(Number);
+const monthIndex = monthNum - 1;
+
+// 3. Filter dataset for general Stats & Chart calculations across all books for this period
+let totalPages = 0;
+let ratingSum = 0;
+let ratedCount = 0;
+const dailyMap: Record<string, number> = {};
+
+books.forEach((b) => {
+  b.logs?.forEach((entry) => {
+    if (period === 'all' || entry.date.startsWith(period)) {
+      totalPages += entry.pagesRead;
+      dailyMap[entry.date] = (dailyMap[entry.date] || 0) + entry.pagesRead;
+    }
+  });
+
+  if (period === 'all' || b.dateFinished?.startsWith(period)) {
+    if (b.rating) {
+      ratingSum += b.rating;
+      ratedCount++;
+    }
+  }
+});
+
+const finishedBooksCount = books.filter((b) => 
+  period === 'all' ? b.status === 'Finished' : b.dateFinished?.startsWith(period)
+).length;
+
+const avgRating = ratedCount > 0 ? (ratingSum / ratedCount).toFixed(1) + ' ★' : 'N/A';
+
+// 4. Filter Bookshelf Index list by Period filter (Supporting multi-month spans)
+const displayedBooks = books.filter((b) => {
+  if (period === 'all') return true;
+  
+  const hasLogsInPeriod = b.logs?.some((l) => l.date.startsWith(period));
+  const startedInPeriod = b.dateStarted?.startsWith(period);
+  const finishedInPeriod = b.dateFinished?.startsWith(period);
+  
+  const periodStartStr = `${period}-01`;
+  const periodEndStr = `${period}-31`;
+  const startedBeforeOrDuring = !b.dateStarted || b.dateStarted <= periodEndStr;
+  const finishedAfterOrDuring = !b.dateFinished || b.dateFinished >= periodStartStr;
+  const spansPeriod = startedBeforeOrDuring && finishedAfterOrDuring;
+
+  return hasLogsInPeriod || startedInPeriod || finishedInPeriod || spansPeriod;
+});
+---
+
+<Layout title="Reading History">
+  <main class="dashboard-container">
+    <div class="header-row">
+      <h1>Reading History & Stats</h1>
+      <div class="admin-auth-widget">
+        <span id="authStatusIndicator" class="auth-badge locked">🔒 Locked</span>
+        <button id="authToggleButton" type="button" class="btn-sm btn-secondary" onclick="toggleAdminMode()">Unlock Edit Mode</button>
+      </div>
+    </div>
+
+    <!-- Controls (Period Filter) -->
+    <div class="controls">
+      <div class="select-wrapper">
+        <label for="monthSelect">Period Filter:</label>
+        <select id="monthSelect" onchange="updateURLFilters()">
+          {availablePeriods.map((p) => (
+            <option value={p} selected={period === p}>
+              {formatPeriodLabel(p)}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+
+    <!-- Key Metrics -->
+    <div class="stats-grid">
+      <div class="card"><h3>{finishedBooksCount}</h3><p>Books Finished</p></div>
+      <div class="card"><h3>{totalPages.toLocaleString()}</h3><p>Pages Read</p></div>
+      <div class="card"><h3>{avgRating}</h3><p>Avg Rating</p></div>
+    </div>
+
+    <!-- Visuals -->
+    <div class="visuals-grid">
+      <div class="card chart-card">
+        <div class="card-header-zoom">
+          <h3>Daily Pages Read</h3>
+          <button type="button" class="btn-zoom" onclick="openZoomModal('chart')">🔍 Enlarge</button>
+        </div>
+        <div class="canvas-container">
+          <canvas id="pagesChart"></canvas>
+        </div>
+      </div>
+      
+      <div class="card">
+        <div class="card-header-zoom">
+          <h3>Monthly Reading Calendar</h3>
+          <div class="calendar-controls-inline">
+            {selectedBookId !== 'all' && (
+              <button type="button" class="btn-sm btn-secondary" onclick="filterCalendarBook('all')">🔄 Show All Books</button>
+            )}
+            <button type="button" class="btn-zoom" onclick="openZoomModal('calendar')">🔍 Enlarge</button>
+          </div>
+        </div>
+        <div id="calendarContainerWrapper">
+          <Calendar 
+            books={books} 
+            year={year} 
+            month={monthIndex} 
+            selectedBookId={selectedBookId}
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- Fullscreen Zoom Modal Overlay -->
+    <div id="zoomModal" class="zoom-overlay" style="display: none;">
+      <div class="zoom-content-card">
+        <div class="zoom-header">
+          <h2 id="zoomModalTitle">Enlarged View</h2>
+          <button type="button" class="btn-close-zoom" onclick="closeZoomModal()">✕ Close</button>
+        </div>
+        <div id="zoomBodyContainer" class="zoom-body">
+          <!-- Injected dynamically via JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Bookshelf Index & Per-Book History View -->
+    <section class="bookshelf-section">
+      <h2>📚 Bookshelf Index & Log History ({formatPeriodLabel(period)})</h2>
+      <div class="bookshelf-list">
+        {displayedBooks.length > 0 ? (
+          displayedBooks.map((b) => (
+            <details class="book-history-accordion" open>
+              <summary class="book-summary-header">
+                <div class="book-header-main">
+                  <a href={`/books/${b.id}`} class="thumb-link" onclick="event.stopPropagation()">
+                    <img src={b.coverUrl} alt={b.title} class="thumb-cover" loading="lazy" width="45" height="65" />
+                  </a>
+                  <div class="book-meta">
+                    <h4><a href={`/books/${b.id}`} class="book-title-link">{b.title}</a></h4>
+                    <p>
+                      {b.author} 
+                      {b.series && ` • ${b.series}${b.seriesNumber !== undefined ? ` #${b.seriesNumber}` : ''}`} 
+                      {' • '}
+                      <span class={`badge ${b.status.toLowerCase().replace(' ', '-')}`}>{b.status}</span> 
+                      {b.rating ? `• ⭐ ${b.rating}` : ''}
+                    </p>
+                  </div>
+                </div>
+                <div class="summary-actions" onclick="event.stopPropagation()">
+                  <button type="button" class="btn-sm btn-calendar-filter" onclick={`filterCalendarBook('${b.id}')`} title="Highlight this book on calendar">
+                    📅 View on Calendar
+                  </button>
+                  {b.reviewUrl && (
+                    <a href={b.reviewUrl} target="_blank" rel="noopener noreferrer" class="btn-sm btn-review" title="Read Blog Review">
+                      🔗 Review
+                    </a>
+                  )}
+                  <button 
+                    type="button" 
+                    class="btn-sm btn-secondary admin-only" 
+                    onclick={`openEditBookModal(${JSON.stringify(b).replace(/'/g, "&#39;")})`}
+                  >
+                    ⚙️ Edit
+                  </button>
+                  <button 
+                    type="button" 
+                    class="btn-add-entry admin-only" 
+                    onclick={`openAddLogModal('${b.id}', '${b.title.replace(/'/g, "\\'")}')`}
+                  >
+                    + Add Log
+                  </button>
+                </div>
+              </summary>
+
+              <div class="history-table-container">
+                {b.logs && b.logs.length > 0 ? (
+                  <div class="table-responsive">
+                    <table class="history-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Pages Read</th>
+                          <th class="admin-only">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {b.logs
+                          .filter(l => period === 'all' || l.date.startsWith(period))
+                          .sort((x, y) => y.date.localeCompare(x.date))
+                          .map((log) => (
+                            <tr>
+                              <td>{log.date}</td>
+                              <td>{log.pagesRead} pages</td>
+                              <td class="action-cell admin-only">
+                                <button 
+                                  type="button"
+                                  class="btn-sm" 
+                                  onclick={`openEditLogModal('${b.id}', '${log.date}', ${log.pagesRead})`}
+                                >
+                                  ✏️ Edit
+                                </button>
+                                <button 
+                                  type="button" 
+                                  class="btn-sm btn-danger" 
+                                  onclick={`deleteLogEntry('${b.id}', '${log.date}')`}
+                                >
+                                  🗑️ Delete
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p class="empty-log-msg">No logs recorded for this book during this period.</p>
+                )}
+              </div>
+            </details>
+          ))
+        ) : (
+          <p class="empty-log-msg">No books found matching this period filter.</p>
+        )}
+      </div>
+    </section>
+
+    <!-- Fully Expanded Add/Edit Log Modal -->
+    <dialog id="editLogModal" class="edit-modal">
+      <form id="editLogForm">
+        <h3 id="modalTitle">Edit Reading Log</h3>
+        <input type="hidden" id="modalBookId" />
+        
+        <label for="modalDateInput">Date:</label>
+        <input type="date" id="modalDateInput" required />
+        
+        <div class="log-input-group">
+          <label for="modalPagesInput">Pages Read Today (Direct):</label>
+          <input type="number" id="modalPagesInput" min="0" placeholder="e.g. 25" />
+        </div>
+
+        <div class="log-input-group">
+          <label for="modalCurrentPageInput">Or New Current Page:</label>
+          <input type="number" id="modalCurrentPageInput" min="0" placeholder="e.g. 150" />
+        </div>
+
+        <div class="log-input-group">
+          <label for="modalPercentageInput">Or Percentage Complete (%):</label>
+          <input type="number" id="modalPercentageInput" min="0" max="100" step="0.1" placeholder="e.g. 45" />
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-sm btn-secondary" onclick="document.getElementById('editLogModal').close()">Cancel</button>
+          <button type="submit" class="btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Fully Expanded Edit Book Details Modal -->
+    <dialog id="editBookModal" class="edit-modal">
+      <form id="editBookForm">
+        <h3>Edit Book Details</h3>
+        <input type="hidden" id="metaBookId" />
+        
+        <label for="metaTitle">Title:</label>
+        <input type="text" id="metaTitle" required />
+        
+        <label for="metaAuthor">Author:</label>
+        <input type="text" id="metaAuthor" required />
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="metaSeries">Series:</label>
+            <input type="text" id="metaSeries" placeholder="e.g. Mistborn" />
+          </div>
+          <div class="form-group">
+            <label for="metaSeriesNumber">Series #:</label>
+            <input type="number" id="metaSeriesNumber" min="0" step="0.5" placeholder="1" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="metaFormat">Format:</label>
+            <select id="metaFormat">
+              <option value="Ebook">Ebook</option>
+              <option value="Physical">Physical</option>
+              <option value="Audiobook">Audiobook</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="metaStatus">Status:</label>
+            <select id="metaStatus">
+              <option value="Reading">Reading</option>
+              <option value="Finished">Finished</option>
+              <option value="DNF">DNF</option>
+              <option value="To Read">To Read</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="metaCurrentPage">Current Page:</label>
+            <input type="number" id="metaCurrentPage" min="0" placeholder="0" />
+          </div>
+          <div class="form-group">
+            <label for="metaTotalPages">Total Pages:</label>
+            <input type="number" id="metaTotalPages" min="1" placeholder="350" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="metaDateStarted">Date Started:</label>
+            <input type="date" id="metaDateStarted" />
+          </div>
+          <div class="form-group">
+            <label for="metaDateFinished">Date Finished:</label>
+            <input type="date" id="metaDateFinished" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="metaRating">Rating (1-5):</label>
+            <input type="number" id="metaRating" min="1" max="5" step="0.5" placeholder="4.5" />
+          </div>
+          <div class="form-group">
+            <label for="metaIsbn">ISBN / UID:</label>
+            <input type="text" id="metaIsbn" placeholder="ISBN..." />
+          </div>
+        </div>
+
+        <label for="metaCoverUrl">Cover Image URL:</label>
+        <input type="url" id="metaCoverUrl" placeholder="https://..." />
+        
+        <label for="metaReviewUrl">Review Post Link:</label>
+        <input type="url" id="metaReviewUrl" placeholder="https://..." />
+
+        <div class="modal-actions modal-actions-split">
+          <button type="button" class="btn-sm btn-danger" onclick="deleteEntireBook()">🗑️ Delete Book</button>
+          <div class="modal-actions-right">
+            <button type="button" class="btn-sm btn-secondary" onclick="document.getElementById('editBookModal').close()">Cancel</button>
+            <button type="submit" class="btn-primary">Save Book Details</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+  </main>
+</Layout>
+
+<script is:inline src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script is:inline define:vars={{ dailyMap }}>
+  // Helper to ensure dates evaluate using local time instead of UTC roll-over
+  function getLocalToday() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const savedPass = localStorage.getItem('admin_password');
+    if (savedPass) {
+      document.body.classList.add('admin-unlocked');
+      const indicator = document.getElementById('authStatusIndicator');
+      if (indicator) {
+        indicator.textContent = '🔓 Unlocked';
+        indicator.classList.remove('locked');
+        indicator.classList.add('unlocked');
+      }
+      const btn = document.getElementById('authToggleButton');
+      if (btn) btn.textContent = 'Lock Edit Mode';
+    }
+  });
+
+  window.toggleAdminMode = function() {
+    const savedPass = localStorage.getItem('admin_password');
+    if (savedPass) {
+      localStorage.removeItem('admin_password');
+      document.body.classList.remove('admin-unlocked');
+      window.location.reload();
+    } else {
+      const password = prompt('🔐 Enter admin password to unlock editing:');
+      if (password) {
+        localStorage.setItem('admin_password', password);
+        document.body.classList.add('admin-unlocked');
+        window.location.reload();
+      }
+    }
+  };
+
+  window.updateURLFilters = function() {
+    const period = document.getElementById('monthSelect').value;
+    const urlParams = new URLSearchParams(window.location.search);
+    urlParams.set('period', period);
+    window.location.search = urlParams.toString();
+  };
+
+  window.filterCalendarBook = function(bookId) {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (bookId === 'all') {
+      urlParams.delete('bookId');
+    } else {
+      urlParams.set('bookId', bookId);
+    }
+    window.location.search = urlParams.toString();
+  };
+
+  const canvasEl = document.getElementById('pagesChart');
+  if (canvasEl) {
+    const ctx = canvasEl.getContext('2d');
+    const labels = Object.keys(dailyMap).sort();
+    const data = labels.map(k => dailyMap[k]);
+
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels.map(d => d.slice(8)),
+        datasets: [{ label: 'Pages Read', data, backgroundColor: '#38bdf8', borderRadius: 4 }]
+      },
+      options: { 
+        responsive: true, 
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true } } 
+      }
+    });
+  }
+
+  // Zoom Modal Logic
+  window.openZoomModal = function(type) {
+    const modal = document.getElementById('zoomModal');
+    const title = document.getElementById('zoomModalTitle');
+    const body = document.getElementById('zoomBodyContainer');
+    modal.style.display = 'flex';
+    body.innerHTML = '';
+
+    if (type === 'chart') {
+      title.textContent = 'Enlarged Daily Pages Read Chart';
+      const newCanvas = document.createElement('canvas');
+      body.appendChild(newCanvas);
+      
+      const labels = Object.keys(dailyMap).sort();
+      const data = labels.map(k => dailyMap[k]);
+      new Chart(newCanvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: labels.map(d => d.slice(8)),
+          datasets: [{ label: 'Pages Read', data, backgroundColor: '#38bdf8', borderRadius: 6 }]
+        },
+        options: { 
+          responsive: true, 
+          maintainAspectRatio: false,
+          scales: { y: { beginAtZero: true } },
+          plugins: { legend: { display: false } }
+        }
+      });
+    } else if (type === 'calendar') {
+      title.textContent = 'Enlarged Monthly Reading Calendar';
+      const calendarGridEl = document.querySelector('.calendar-grid');
+      if (calendarGridEl) {
+        const calendarClone = calendarGridEl.cloneNode(true);
+        calendarClone.style.fontSize = '1.1rem';
+        body.appendChild(calendarClone);
+      }
+    }
+  };
+
+  window.closeZoomModal = function() {
+    document.getElementById('zoomModal').style.display = 'none';
+  };
+
+  window.openEditLogModal = function(bookId, dateStr, currentPages) {
+    document.getElementById('modalTitle').innerText = `Edit Log (${dateStr})`;
+    document.getElementById('modalBookId').value = bookId;
+    document.getElementById('modalDateInput').value = dateStr;
+    document.getElementById('modalPagesInput').value = currentPages;
+    document.getElementById('modalCurrentPageInput').value = '';
+    document.getElementById('modalPercentageInput').value = '';
+    document.getElementById('editLogModal').showModal();
+  };
+
+  window.openAddLogModal = function(bookId, title) {
+    const today = getLocalToday();
+    document.getElementById('modalTitle').innerText = `Add Log for ${title}`;
+    document.getElementById('modalBookId').value = bookId;
+    document.getElementById('modalDateInput').value = today;
+    document.getElementById('modalPagesInput').value = '';
+    document.getElementById('modalCurrentPageInput').value = '';
+    document.getElementById('modalPercentageInput').value = '';
+    document.getElementById('editLogModal').showModal();
+  };
+
+  window.openEditBookModal = function(book) {
+    document.getElementById('metaBookId').value = book.id;
+    document.getElementById('metaTitle').value = book.title || '';
+    document.getElementById('metaAuthor').value = book.author || '';
+    document.getElementById('metaSeries').value = book.series || '';
+    document.getElementById('metaSeriesNumber').value = book.seriesNumber !== undefined && book.seriesNumber !== null ? book.seriesNumber : '';
+    document.getElementById('metaFormat').value = book.format || 'Physical';
+    document.getElementById('metaStatus').value = book.status || 'Finished';
+    document.getElementById('metaCurrentPage').value = book.currentPage !== undefined ? book.currentPage : '';
+    document.getElementById('metaTotalPages').value = book.totalPages !== undefined ? book.totalPages : '';
+    document.getElementById('metaDateStarted').value = book.dateStarted || '';
+    document.getElementById('metaDateFinished').value = book.dateFinished || '';
+    document.getElementById('metaRating').value = book.rating !== undefined && book.rating !== null ? book.rating : '';
+    document.getElementById('metaIsbn').value = book.isbn || '';
+    document.getElementById('metaCoverUrl').value = book.coverUrl || '';
+    document.getElementById('metaReviewUrl').value = book.reviewUrl || '';
+    document.getElementById('editBookModal').showModal();
+  };
+
+  window.deleteEntireBook = async function() {
+    const id = document.getElementById('metaBookId').value;
+    const title = document.getElementById('metaTitle').value;
+    if (!confirm(`Are you sure you want to completely delete "${title}" and all its logs?`)) return;
+
+    const adminPassword = localStorage.getItem('admin_password') || '';
+    const res = await fetch('/api/book-edit', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Admin-Password': adminPassword
+      },
+      body: JSON.stringify({ id, deleteBook: true })
+    });
+
+    if (res.status === 401) {
+      alert('Unauthorized. Please enter a valid admin password.');
+      localStorage.removeItem('admin_password');
+      window.location.reload();
+    } else if (res.ok) {
+      window.location.reload();
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      alert(`Failed to delete book: ${errData.error || 'Unknown error'}`);
+    }
+  };
+
+  window.deleteLogEntry = async function(bookId, dateStr) {
+    if (!confirm(`Are you sure you want to delete the log for ${dateStr}?`)) return;
+
+    const adminPassword = localStorage.getItem('admin_password') || '';
+    const res = await fetch('/api/log-edit', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Admin-Password': adminPassword
+      },
+      body: JSON.stringify({ bookId, date: dateStr, pagesRead: 0, delete: true })
+    });
+
+    if (res.status === 401) {
+      alert('Unauthorized. Please re-unlock with a valid admin password.');
+      localStorage.removeItem('admin_password');
+      window.location.reload();
+    } else if (res.ok) {
+      window.location.reload();
+    } else {
+      alert('Failed to delete log entry.');
+    }
+  };
+
+  document.getElementById('editLogForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = document.querySelector('#editLogForm button[type="submit"]');
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = 'Saving...';
+    submitBtn.disabled = true;
+
+    const bookId = document.getElementById('modalBookId').value;
+    const date = document.getElementById('modalDateInput').value || getLocalToday();
+    const pagesRead = document.getElementById('modalPagesInput').value;
+    const currentPage = document.getElementById('modalCurrentPageInput').value;
+    const percentage = document.getElementById('modalPercentageInput').value;
+
+    const adminPassword = localStorage.getItem('admin_password') || '';
+
+    try {
+      const res = await fetch('/api/log-edit', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Admin-Password': adminPassword
+        },
+        body: JSON.stringify({ bookId, date, pagesRead, currentPage, percentage })
+      });
+
+      if (res.status === 401) {
+        alert('Unauthorized password.');
+        localStorage.removeItem('admin_password');
+        window.location.reload();
+      } else if (res.ok) {
+        document.getElementById('editLogModal').close();
+        window.location.reload();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Error saving log entry: ${errData.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      alert('Network error while saving log.');
+    } finally {
+      submitBtn.textContent = originalText;
+      submitBtn.disabled = false;
+    }
+  });
+
+  document.getElementById('editBookForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = document.querySelector('#editBookForm button[type="submit"]');
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = 'Saving...';
+    submitBtn.disabled = true;
+
+    const id = document.getElementById('metaBookId').value;
+    const title = document.getElementById('metaTitle').value;
+    const author = document.getElementById('metaAuthor').value;
+    const series = document.getElementById('metaSeries').value;
+    const seriesNumber = document.getElementById('metaSeriesNumber').value;
+    const format = document.getElementById('metaFormat').value;
+    const status = document.getElementById('metaStatus').value;
+    const currentPage = document.getElementById('metaCurrentPage').value;
+    const totalPages = document.getElementById('metaTotalPages').value;
+    const dateStarted = document.getElementById('metaDateStarted').value;
+    const dateFinished = document.getElementById('metaDateFinished').value;
+    const rating = document.getElementById('metaRating').value;
+    const isbn = document.getElementById('metaIsbn').value;
+    const coverUrl = document.getElementById('metaCoverUrl').value;
+    const reviewUrl = document.getElementById('metaReviewUrl').value;
+
+    const adminPassword = localStorage.getItem('admin_password') || '';
+
+    try {
+      const res = await fetch('/api/book-edit', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Admin-Password': adminPassword
+        },
+        body: JSON.stringify({ 
+          id, 
+          title, 
+          author, 
+          series: series ? series.trim() : undefined,
+          seriesNumber: seriesNumber !== '' ? Number(seriesNumber) : undefined,
+          format,
+          status,
+          currentPage: currentPage !== '' ? Number(currentPage) : undefined,
+          totalPages: totalPages !== '' ? Number(totalPages) : undefined,
+          dateStarted: dateStarted || undefined,
+          dateFinished: dateFinished || undefined,
+          rating: rating !== '' ? Number(rating) : undefined,
+          isbn: isbn || '',
+          coverUrl, 
+          reviewUrl 
+        })
+      });
+
+      if (res.status === 401) {
+        alert('Unauthorized password.');
+        localStorage.removeItem('admin_password');
+        window.location.reload();
+      } else if (res.ok) {
+        document.getElementById('editBookModal').close();
+        window.location.reload();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Failed to update book details: ${errData.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      alert('Network error while saving book details.');
+    } finally {
+      submitBtn.textContent = originalText;
+      submitBtn.disabled = false;
+    }
+  });
+</script>
+
+<style>
+  .dashboard-container { max-width: 1050px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+  .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
+  .header-row h1 { font-size: 1.6rem; margin: 0; color: var(--heading-text); }
+  
+  .admin-auth-widget { display: flex; align-items: center; gap: 0.5rem; }
+  .auth-badge { font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 600; }
+  .auth-badge.locked { background: #fee2e2; color: #dc2626; }
+  .auth-badge.unlocked { background: #dcfce7; color: #15803d; }
+
+  .admin-only { display: none !important; }
+  body.admin-unlocked .admin-only { display: inline-flex !important; }
+  body.admin-unlocked table tr th.admin-only,
+  body.admin-unlocked table tr td.admin-only { display: table-cell !important; }
+
+  .controls { display: flex; gap: 1.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .select-wrapper { display: flex; flex-direction: column; gap: 0.3rem; width: 100%; max-width: 300px; }
+  .controls label { font-size: 0.85rem; font-weight: 600; color: var(--text); opacity: 0.8; }
+  .controls select { padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border); font-size: 0.9rem; background: var(--card-bg); color: var(--text); }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .card { background: var(--card-bg); border: 1px solid var(--border); padding: 1.25rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .card h3 { font-size: 1.6rem; font-weight: 700; color: #0284c7; margin: 0; }
+  .card p { font-size: 0.85rem; color: var(--text); opacity: 0.7; margin: 0.2rem 0 0; }
+  
+  .visuals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2.5rem; }
+  .chart-card { display: flex; flex-direction: column; }
+  .canvas-container { position: relative; width: 100%; height: 260px; flex-grow: 1; }
+
+  /* Zoom controls & Modal Styles */
+  .card-header-zoom { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  .btn-zoom { background: var(--border); border: 1px solid var(--border); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: var(--text); }
+  .btn-zoom:hover { opacity: 0.85; }
+  .calendar-controls-inline { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+
+  .zoom-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; justify-content: center; align-items: center; padding: 1.5rem; }
+  .zoom-content-card { background: var(--card-bg); color: var(--text); width: 100%; max-width: 900px; height: 80vh; border-radius: 12px; display: flex; flex-direction: column; padding: 1.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+  .zoom-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; }
+  .btn-close-zoom { background: #fee2e2; color: #991b1b; border: none; padding: 0.4rem 0.8rem; border-radius: 6px; font-weight: bold; cursor: pointer; }
+  .zoom-body { flex: 1; position: relative; overflow-y: auto; display: flex; flex-direction: column; }
+  .zoom-body canvas { width: 100% !important; height: 100% !important; }
+
+  .bookshelf-section { margin-top: 2rem; border-top: 1px solid var(--border); padding-top: 1.5rem; }
+  .bookshelf-section h2 { font-size: 1.3rem; color: var(--text); }
+  .bookshelf-list { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem; }
+  
+  .book-history-accordion { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.03); }
+  .book-summary-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.75rem 1rem; cursor: pointer; list-style: none; background: var(--card-bg); transition: background 0.2s; flex-wrap: wrap; }
+  .book-summary-header:hover { opacity: 0.9; }
+  .book-header-main { display: flex; align-items: center; gap: 1rem; flex: 1; min-width: 240px; }
+  .thumb-cover { width: 45px; height: 65px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); flex-shrink: 0; }
+  .book-meta { flex: 1; min-width: 0; }
+  .book-meta h4 { font-size: 0.95rem; margin: 0 0 0.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .book-title-link { color: var(--text); text-decoration: none; }
+  .book-title-link:hover { color: var(--primary); text-decoration: underline; }
+  .book-meta p { font-size: 0.8rem; color: var(--text); opacity: 0.7; margin: 0; }
+  
+  .summary-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .btn-calendar-filter { background: #f3e8ff; color: #7e22ce; border: 1px solid #e9d5ff; font-weight: 600; }
+  .btn-calendar-filter:hover { opacity: 0.9; }
+  .btn-review { background: #e0f2fe; color: #0369a1; text-decoration: none; padding: 0.35rem 0.6rem; border-radius: 4px; font-weight: 600; font-size: 0.75rem; border: 1px solid #bae6fd; }
+  .btn-review:hover { opacity: 0.9; }
+  .btn-add-entry { background: var(--primary); color: #fff; border: none; padding: 0.35rem 0.7rem; border-radius: 4px; font-size: 0.8rem; cursor: pointer; font-weight: 500; }
+  .btn-add-entry:hover { opacity: 0.9; }
+
+  .history-table-container { padding: 0 1rem 1rem 1rem; border-top: 1px solid var(--border); background: var(--card-bg); }
+  .table-responsive { width: 100%; overflow-x: auto; }
+  .history-table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; font-size: 0.85rem; min-width: 280px; color: var(--text); }
+  .history-table th, .history-table td { padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border); }
+  .history-table th { color: var(--text); opacity: 0.8; font-weight: 600; }
+  .action-cell { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); cursor: pointer; }
+  .btn-sm:hover { opacity: 0.85; }
+  .btn-secondary { background: var(--border); color: var(--text); }
+  .btn-secondary:hover { opacity: 0.85; }
+  .btn-danger { color: #dc2626; border-color: #fca5a5; }
+  .btn-danger:hover { background: #fee2e2; }
+  .empty-log-msg { color: var(--text); opacity: 0.7; font-size: 0.85rem; font-style: italic; padding: 0.75rem 0 0.25rem; }
+
+  .badge { font-size: 0.65rem; font-weight: bold; padding: 2px 5px; border-radius: 4px; background: var(--border); color: var(--text); }
+  .badge.reading { background: #e0f2fe; color: #0369a1; }
+  .badge.finished { background: #dcfce7; color: #15803d; }
+  .badge.dnf { background: #fee2e2; color: #991b1b; }
+
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+  @media(max-width: 480px) {
+    .form-row { grid-template-columns: 1fr; }
+  }
+  
+  .edit-modal { border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 8px; padding: 1.5rem; max-width: 450px; width: 90%; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  .edit-modal form { display: flex; flex-direction: column; gap: 0.7rem; }
+  .edit-modal label { font-size: 0.8rem; font-weight: 600; color: var(--text); }
+  .edit-modal select, .edit-modal input { padding: 0.45rem; border-radius: 4px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); width: 100%; font-size: 0.85rem; box-sizing: border-box; }
+  
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
+  .modal-actions-split { justify-content: space-between; align-items: center; }
+  .modal-actions-right { display: flex; gap: 0.5rem; }
+  
+  .btn-primary { background: var(--primary); color: #fff; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
+  .btn-primary:hover { opacity: 0.9; }
+</style>

@@ -1,0 +1,400 @@
+---
+// src/pages/entry.astro
+import Layout from '../layouts/Layout.astro';
+import { getAllBooks } from '../lib/storage';
+
+export const prerender = false;
+
+const books = await getAllBooks();
+const currentlyReading = books.filter((b) => b.status === 'Reading');
+---
+
+<Layout title="Log Reading Progress">
+  <main class="entry-container">
+    <!-- Password Protection Gate -->
+    <div id="authGate" class="card auth-gate" style="display: none;">
+      <h2>🔐 Admin Authentication Required</h2>
+      <p>Please enter your admin password to access the entry tracker.</p>
+      <form id="authForm">
+        <label>Password
+          <input type="password" id="adminPasswordInput" placeholder="Enter password" required />
+        </label>
+        <button type="submit" class="btn">Unlock</button>
+      </form>
+    </div>
+
+    <!-- Protected Content Container -->
+    <div id="protectedContent" style="display: none;">
+      <h1>Log & Manage Books</h1>
+
+      <!-- Log Progress for Currently Reading Books Section -->
+      <section class="card">
+        <h2>Log Reading Progress</h2>
+        <form id="quickUpdateForm">
+          <label>Select Book
+            <select id="activeBookSelect" required>
+              <option value="" disabled selected>-- Choose a currently reading book --</option>
+              {currentlyReading.map((book) => (
+                <option value={book.id}>
+                  {book.title} (p. {book.currentPage || 0}/{book.totalPages || '?'})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <!-- Dynamic Progress Fields -->
+          <div id="existingBookFields" class="hidden edit-fields-grid">
+            <div id="bookDetailsPreview" class="book-preview-meta"></div>
+
+            <div class="form-row">
+              <label>Pages Read Today (Direct) <input type="number" id="pagesReadToday" min="0" placeholder="e.g. 25" /></label>
+              <label>Or New Current Page <input type="number" id="newCurrentPage" min="0" placeholder="e.g. 150" /></label>
+            </div>
+
+            <div class="form-row">
+              <label>Or Percentage Complete (%) <input type="number" id="newPercentage" min="0" max="100" step="0.1" placeholder="45" /></label>
+              <label>Log Date <input type="date" id="logDate" /></label>
+            </div>
+
+            <button type="submit" class="btn">Save Progress Log</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Start a New Book Section -->
+      <section class="card">
+        <h2>Start a New Book</h2>
+        <form id="newBookForm">
+          <label>Title <input type="text" id="newTitle" required /></label>
+          
+          <div class="form-row">
+            <label>Author <input type="text" id="newAuthor" required /></label>
+            <label>Series (Optional) <input type="text" id="newSeries" placeholder="e.g. Mistborn" /></label>
+          </div>
+          
+          <div class="form-row">
+            <label>Series Number (Optional) <input type="number" id="newSeriesNumber" min="0" step="0.5" placeholder="e.g. 1" /></label>
+            <label>Total Pages <input type="number" id="newTotalPages" required /></label>
+          </div>
+
+          <div class="form-row">
+            <label>ISBN-13 (Auto Cover) <input type="text" id="newIsbn" placeholder="9780593135204" /></label>
+            <label>Initial Rating (Optional) <input type="number" id="newRating" min="1" max="5" step="0.5" placeholder="e.g. 4.5" /></label>
+          </div>
+
+          <div class="form-row">
+            <label>Format
+              <select id="newFormat">
+                <option value="Ebook">Ebook</option>
+                <option value="Physical">Physical</option>
+                <option value="Audiobook">Audiobook</option>
+              </select>
+            </label>
+            <label>Custom Cover Image URL (Optional override)
+              <input type="url" id="newCustomCover" placeholder="https://example.com/cover.jpg" />
+            </label>
+          </div>
+          
+          <button type="submit" class="btn secondary">Add to Bookshelf</button>
+        </form>
+      </section>
+
+      <!-- Cover Cleanup Utility Section -->
+      <section class="card">
+        <h2>Batch Cover Cleanup</h2>
+        <p class="cleanup-desc">
+          Scan existing books, replace dead Open Library placeholders, and fetch fresh covers via Google Books.
+        </p>
+        <button type="button" id="runCleanupBtn" class="btn secondary">Run Cover Cleanup</button>
+        <div id="cleanupStatus" class="cleanup-status"></div>
+      </section>
+    </div>
+  </main>
+</Layout>
+
+<script define:vars={{ books, currentlyReading }}>
+  // Helper to ensure dates evaluate using local time instead of UTC roll-over
+  function getLocalToday() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  // Auth Gate check on load
+  async function checkAuth() {
+    const pwd = localStorage.getItem('admin_password') || '';
+    if (!pwd) {
+      document.getElementById('authGate').style.display = 'block';
+      return;
+    }
+
+    const testRes = await fetch('/api/log-edit', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Admin-Password': pwd 
+      },
+      body: JSON.stringify({ bookId: 'test-ping' })
+    });
+
+    if (testRes.status === 401) {
+      localStorage.removeItem('admin_password');
+      document.getElementById('authGate').style.display = 'block';
+    } else {
+      document.getElementById('protectedContent').style.display = 'block';
+    }
+  }
+
+  document.getElementById('authForm')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const pwd = document.getElementById('adminPasswordInput').value;
+    localStorage.setItem('admin_password', pwd);
+    window.location.reload();
+  });
+
+  checkAuth();
+
+  // Populate form fields & default local date when an existing book is selected
+  const activeBookSelect = document.getElementById('activeBookSelect');
+  const existingBookFields = document.getElementById('existingBookFields');
+  const bookDetailsPreview = document.getElementById('bookDetailsPreview');
+  const logDateInput = document.getElementById('logDate');
+
+  if (logDateInput) {
+    logDateInput.value = getLocalToday();
+  }
+
+  activeBookSelect?.addEventListener('change', () => {
+    const selectedId = activeBookSelect.value;
+    const book = books.find(b => b.id === selectedId);
+
+    if (book) {
+      existingBookFields?.classList.remove('hidden');
+      if (bookDetailsPreview) {
+        bookDetailsPreview.innerHTML = `<strong>Author:</strong> ${book.author || 'Unknown'} | <strong>Total Pages:</strong> ${book.totalPages || 'Unknown'}`;
+      }
+      
+      // Clear log inputs on selection change
+      document.getElementById('pagesReadToday').value = '';
+      document.getElementById('newCurrentPage').value = '';
+      document.getElementById('newPercentage').value = '';
+    } else {
+      existingBookFields?.classList.add('hidden');
+    }
+  });
+
+  // Handle logging progress for the selected book via log-edit API
+  document.getElementById('quickUpdateForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const bookId = activeBookSelect.value;
+    if (!bookId) return;
+
+    const submitBtn = document.querySelector('#quickUpdateForm button[type="submit"]');
+    const originalBtnText = submitBtn.textContent;
+    submitBtn.textContent = 'Saving progress...';
+    submitBtn.disabled = true;
+
+    const pagesRead = document.getElementById('pagesReadToday').value;
+    const currentPage = document.getElementById('newCurrentPage').value;
+    const percentage = document.getElementById('newPercentage').value;
+    const logDate = document.getElementById('logDate').value || getLocalToday();
+
+    const adminPassword = localStorage.getItem('admin_password') || '';
+
+    try {
+      const logRes = await fetch('/api/log-edit', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Admin-Password': adminPassword
+        },
+        body: JSON.stringify({ 
+          bookId, 
+          date: logDate, 
+          pagesRead: pagesRead ? Number(pagesRead) : 0, 
+          currentPage: currentPage !== '' ? Number(currentPage) : undefined, 
+          percentage: percentage !== '' ? Number(percentage) : undefined 
+        })
+      });
+
+      if (!logRes.ok) {
+        const errData = await logRes.json().catch(() => ({}));
+        alert(`Failed to save progress log: ${errData.error || 'Unknown error'}`);
+        return;
+      }
+
+      window.location.href = '/history';
+    } catch (err) {
+      alert('Network error while saving progress.');
+    } finally {
+      submitBtn.textContent = originalBtnText;
+      submitBtn.disabled = false;
+    }
+  });
+
+  // Handle adding completely new books
+  document.getElementById('newBookForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const submitBtn = document.querySelector('#newBookForm button[type="submit"]');
+    const originalBtnText = submitBtn.textContent;
+    submitBtn.textContent = 'Adding book...';
+    submitBtn.disabled = true;
+
+    const title = document.getElementById('newTitle').value;
+    const author = document.getElementById('newAuthor').value;
+    const series = document.getElementById('newSeries').value;
+    const seriesNumber = document.getElementById('newSeriesNumber').value;
+    const isbn = document.getElementById('newIsbn').value;
+    const totalPages = document.getElementById('newTotalPages').value;
+    const rating = document.getElementById('newRating').value;
+    const customCover = document.getElementById('newCustomCover').value;
+    const format = document.getElementById('newFormat').value;
+
+    const id = crypto.randomUUID();
+    const slug = title
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/[\s_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+    const adminPassword = localStorage.getItem('admin_password') || '';
+
+    try {
+      const res = await fetch('/api/log', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Admin-Password': adminPassword
+        },
+        body: JSON.stringify({ 
+          id,
+          slug,
+          title, 
+          author, 
+          series: series ? series.trim() : undefined,
+          seriesNumber: seriesNumber ? Number(seriesNumber) : undefined,
+          isbn, 
+          totalPages: Number(totalPages), 
+          rating: rating ? Number(rating) : undefined,
+          format, 
+          currentPage: 0, 
+          status: 'To Read',
+          dateStarted: getLocalToday(),
+          coverUrl: customCover || '', 
+          logs: []
+        })
+      });
+
+      if (res.ok) {
+        window.location.reload();
+      } else if (res.status === 401) {
+        alert('Unauthorized. Please check your admin password.');
+        localStorage.removeItem('admin_password');
+        window.location.reload();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Error adding book: ${errData.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      alert('Network error while adding book.');
+    } finally {
+      submitBtn.textContent = originalBtnText;
+      submitBtn.disabled = false;
+    }
+  });
+
+  // Handle batch cover cleanup button (sequential chunked processing with live UI status)
+  document.getElementById('runCleanupBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('runCleanupBtn');
+    const statusDiv = document.getElementById('cleanupStatus');
+    const adminPassword = localStorage.getItem('admin_password') || '';
+
+    if (!adminPassword) {
+      alert('Please unlock the page with your admin password first.');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to batch cleanup covers? This will process your library sequentially.')) {
+      return;
+    }
+
+    btn.setAttribute('disabled', 'true');
+    statusDiv.style.color = '#0284c7';
+
+    let keepGoing = true;
+    let processedCount = 0;
+
+    try {
+      while (keepGoing) {
+        btn.textContent = `Cleaning... (${processedCount} processed)`;
+        statusDiv.textContent = `Connecting to server...`;
+        
+        const res = await fetch('/api/run-cover-cleanup', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminPassword
+          }
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Unknown error occurred');
+        }
+
+        if (data.remaining === 0 || data.message?.includes('up to date')) {
+          keepGoing = false;
+          statusDiv.style.color = '#059669';
+          statusDiv.textContent = `Cleanup complete! Processed ${processedCount} books successfully. All covers up to date.`;
+        } else {
+          processedCount++;
+          statusDiv.style.color = '#0284c7';
+          statusDiv.textContent = data.message || `Processed ${processedCount} books... (${data.remaining} remaining)`;
+          
+          await new Promise(r => setTimeout(r, 400));
+        }
+      }
+    } catch (err) {
+      statusDiv.style.color = '#dc2626';
+      statusDiv.textContent = `Error: ${err.message}`;
+    } finally {
+      btn.textContent = 'Run Cover Cleanup';
+      btn.removeAttribute('disabled');
+    }
+  });
+</script>
+
+<style>
+  .entry-container { max-width: 650px; margin: 0 auto; padding: 0 1rem 3rem; }
+  .entry-container h1 { font-size: 1.8rem; color: var(--heading-text); margin-bottom: 1.5rem; }
+  
+  .card { background: var(--card-bg); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .card h2 { margin-bottom: 1rem; font-size: 1.2rem; color: var(--text); }
+  
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .edit-fields-grid { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+  
+  .book-preview-meta { font-size: 0.85rem; color: var(--text); opacity: 0.7; margin-bottom: 0.5rem; }
+  .cleanup-desc { font-size: 0.85rem; color: var(--text); opacity: 0.7; margin-bottom: 1rem; }
+  .cleanup-status { margin-top: 0.75rem; font-size: 0.85rem; font-weight: 600; }
+
+  label { display: block; margin-bottom: 1rem; font-weight: 600; font-size: 0.85rem; color: var(--text); opacity: 0.9; }
+  
+  input, select { width: 100%; padding: 0.6rem; margin-top: 0.25rem; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 6px; font-size: 0.9rem; box-sizing: border-box; }
+  
+  .btn { width: 100%; padding: 0.75rem; background: var(--primary); color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 0.5rem; }
+  .btn:hover { opacity: 0.9; }
+  .btn.secondary { background: var(--text); color: var(--bg); }
+  .btn.secondary:hover { opacity: 0.85; }
+  
+  .hidden { display: none; }
+
+  @media(max-width: 480px) {
+    .form-row { grid-template-columns: 1fr; }
+  }
+</style>

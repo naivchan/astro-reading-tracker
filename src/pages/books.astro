@@ -1,0 +1,229 @@
+---
+// src/pages/books.astro
+import Layout from '../layouts/Layout.astro';
+import { getAllBooks } from '../lib/storage';
+
+export const prerender = false;
+
+const books = await getAllBooks();
+
+// Extract available years dynamically from finished/DNF books based on dateFinished
+const years = [...new Set(books.map(b => b.dateFinished ? b.dateFinished.slice(0, 4) : null).filter(Boolean))].sort().reverse();
+
+// Helper to get the latest timestamp from a book's logs
+const getLatestLogTime = (book) => {
+  if (!book.logs || book.logs.length === 0) return 0;
+  return Math.max(...book.logs.map(l => new Date(l.date || l.timestamp).getTime()));
+};
+
+const reading = books
+  .filter((b) => b.status === 'Reading')
+  .sort((a, b) => getLatestLogTime(b) - getLatestLogTime(a));
+
+const finished = books
+  .filter((b) => b.status === 'Finished')
+  .sort((a, b) => new Date(b.dateFinished || 0).getTime() - new Date(a.dateFinished || 0).getTime());
+
+const dnf = books
+  .filter((b) => b.status === 'DNF' || b.status === 'Did Not Finish')
+  .sort((a, b) => new Date(b.dateFinished || 0).getTime() - new Date(a.dateFinished || 0).getTime());
+---
+
+<Layout title="Bookshelf Index">
+  <main class="bookshelf-container">
+    <div class="header-row">
+      <h1>Bookshelf Index</h1>
+      
+      <!-- Year Filter UI -->
+      {years.length > 0 && (
+        <div class="year-filter-wrapper">
+          <label for="year-select">Filter Year:</label>
+          <select id="year-select">
+            <option value="all">All Years</option>
+            {years.map((year) => (
+              <option value={year}>{year}</option>
+            ))}
+          </select>
+        </div>
+      )}
+    </div>
+
+    <!-- Currently Reading (Always visible) -->
+    <section>
+      <h2>📖 Currently Reading ({reading.length})</h2>
+      <div class="book-grid">
+        {reading.map((book) => {
+          const latestPages = book.currentPage !== undefined && book.currentPage !== null 
+            ? book.currentPage 
+            : (book.logs && book.logs.length > 0 ? book.logs.reduce((sum, l) => sum + (l.pagesRead || 0), 0) : 0);
+
+          return (
+            <div class="book-card">
+              <a href={`/books/${book.id}`} class="card-link">
+                <img src={book.coverUrl} alt={book.title} loading="lazy" width="150" height="235" />
+                <h3>{book.title}</h3>
+              </a>
+              <p>{book.author}</p>
+              {book.series && (
+                <span class="badge series">
+                  {book.series}{book.seriesNumber !== undefined ? ` #${book.seriesNumber}` : ''}
+                </span>
+              )}
+              
+              <div class="card-meta">
+                <span class="badge reading">
+                  {book.totalPages ? `${latestPages} / ${book.totalPages} pgs` : `${latestPages} pgs`}
+                </span>
+                {book.reviewUrl && (
+                  <a href={book.reviewUrl} target="_blank" rel="noopener noreferrer" class="badge review" title="Read Blog Review">
+                    🔗 Review
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+
+    <!-- Finished Books -->
+    <section class="book-section" data-section-type="finished">
+      <h2>🏆 Finished Books (<span id="finished-count">{finished.length}</span>)</h2>
+      <div class="book-grid">
+        {finished.map((book) => {
+          const bookYear = book.dateFinished ? book.dateFinished.slice(0, 4) : '';
+          return (
+            <div class="book-card" data-year={bookYear}>
+              <a href={`/books/${book.id}`} class="card-link">
+                <img src={book.coverUrl} alt={book.title} loading="lazy" width="150" height="235" />
+                <h3>{book.title}</h3>
+              </a>
+              <p>{book.author}</p>
+              {book.series && (
+                <span class="badge series">
+                  {book.series}{book.seriesNumber !== undefined ? ` #${book.seriesNumber}` : ''}
+                </span>
+              )}
+              
+              <div class="card-meta">
+                {book.rating && <span class="badge rating">⭐ {book.rating}</span>}
+                {book.reviewUrl && (
+                  <a href={book.reviewUrl} target="_blank" rel="noopener noreferrer" class="badge review" title="Read Blog Review">
+                    🔗 Review
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+
+    <!-- DNF Books -->
+    <section class="book-section" data-section-type="dnf">
+      <h2>⚠️ DNF / Dropped (<span id="dnf-count">{dnf.length}</span>)</h2>
+      <div class="book-grid">
+        {dnf.map((book) => {
+          const bookYear = book.dateFinished ? book.dateFinished.slice(0, 4) : '';
+          return (
+            <div class="book-card" data-year={bookYear}>
+              <a href={`/books/${book.id}`} class="card-link">
+                <img src={book.coverUrl} alt={book.title} loading="lazy" width="150" height="235" />
+                <h3>{book.title}</h3>
+              </a>
+              <p>{book.author}</p>
+              {book.series && (
+                <span class="badge series">
+                  {book.series}{book.seriesNumber !== undefined ? ` #${book.seriesNumber}` : ''}
+                </span>
+              )}
+              
+              <div class="card-meta">
+                <span class="badge dnf">DNF</span>
+                {book.reviewUrl && (
+                  <a href={book.reviewUrl} target="_blank" rel="noopener noreferrer" class="badge review" title="Read Blog Review">
+                    🔗 Review
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  </main>
+</Layout>
+
+<script>
+  // Client-side filtering script for instant performance
+  const yearSelect = document.getElementById('year-select') as HTMLSelectElement;
+  if (yearSelect) {
+    yearSelect.addEventListener('change', (e) => {
+      const selectedYear = (e.target as HTMLSelectElement).value;
+      const sections = document.querySelectorAll('.book-section');
+
+      sections.forEach((section) => {
+        let visibleCount = 0;
+        const cards = section.querySelectorAll('.book-card');
+
+        cards.forEach((card) => {
+          const cardYear = card.getAttribute('data-year');
+          if (selectedYear === 'all' || cardYear === selectedYear) {
+            (card as HTMLElement).style.display = '';
+            visibleCount++;
+          } else {
+            (card as HTMLElement).style.display = 'none';
+          }
+        });
+
+        // Update count dynamically in section header
+        const type = section.getAttribute('data-section-type');
+        const countSpan = document.getElementById(`${type}-count`);
+        if (countSpan) {
+          countSpan.textContent = String(visibleCount);
+        }
+
+        // Hide section entirely if no items match the year filter
+        if (visibleCount === 0 && selectedYear !== 'all') {
+          (section as HTMLElement).style.display = 'none';
+        } else {
+          (section as HTMLElement).style.display = '';
+        }
+      });
+    });
+  }
+</script>
+
+<style>
+  .bookshelf-container { max-width: 950px; margin: 0 auto; padding: 2rem 1rem; }
+  
+  .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
+  .bookshelf-container h1 { font-size: 1.8rem; color: var(--heading-text) !important; margin: 0; }
+  
+  .year-filter-wrapper { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text); opacity: 0.8; font-weight: 500; }
+  .year-filter-wrapper select { padding: 0.35rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg); color: var(--text); font-size: 0.85rem; cursor: pointer; }
+
+  section h2 { font-size: 1.3rem; color: var(--text); margin-bottom: 1.0rem; border-bottom: 2px solid var(--border); padding-bottom: 0.4rem; }
+
+  .book-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; }
+  
+  .book-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; text-align: center; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 1px 3px rgba(0,0,0,0.03); transition: transform 0.2s, box-shadow 0.2s; }
+  .book-card:hover { transform: translateY(-3px); box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
+
+  .card-link { text-decoration: none; color: inherit; display: block; }
+  
+  .book-card img { width: 100%; height: 235px; object-fit: cover; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.15); }
+  
+  .book-card h3 { font-size: 0.9rem; font-weight: 600; color: var(--text); margin: 0.5rem 0 0.1rem; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .book-card p { font-size: 0.75rem; color: var(--text); opacity: 0.7; margin: 0 0 0.25rem; }
+
+  .card-meta { display: flex; gap: 0.4rem; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: auto; padding-top: 0.25rem; }
+  
+  .badge { font-size: 0.7rem; font-weight: bold; padding: 2px 6px; border-radius: 4px; text-decoration: none; display: inline-flex; align-items: center; gap: 2px; }
+  .badge.series { background: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff; margin-bottom: 0.25rem; font-weight: 500; font-size: 0.65rem; }
+  .badge.reading { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+  .badge.rating { background: #fef9c3; color: #a16207; border: 1px solid #fef08a; }
+  .badge.dnf { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+  .badge.review { background: var(--border); color: var(--text); border: 1px solid var(--border); }
+  .badge.review:hover { opacity: 0.85; }
+</style>

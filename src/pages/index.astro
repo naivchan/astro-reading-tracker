@@ -1,0 +1,202 @@
+---
+// src/pages/index.astro
+export const prerender = false; // Required so it can read live Netlify Blobs
+
+import Layout from '../layouts/Layout.astro';
+import Calendar from '../components/Calendar.astro';
+import { getAllBooks } from '../lib/storage';
+
+const books = await getAllBooks(); // Pulls live updates from Netlify Blobs
+
+// 1. Filter Currently Reading
+const currentlyReading = books.filter((b) => b.status === 'Reading');
+
+// 2. Lifetime Stats Calculations (Optimized single-pass loop)
+let lifetimePages = 0;
+let totalRatingSum = 0;
+let ratedBooksCount = 0;
+let finishedCount = 0;
+
+books.forEach((b) => {
+  if (b.status === 'Finished') {
+    finishedCount++;
+  }
+  b.logs?.forEach((l) => {
+    lifetimePages += l.pagesRead;
+  });
+  if (b.rating) {
+    totalRatingSum += b.rating;
+    ratedBooksCount++;
+  }
+});
+
+const lifetimeAvgRating = ratedBooksCount > 0 ? (totalRatingSum / ratedBooksCount).toFixed(1) : 'N/A';
+
+// 3. Current Month Details
+const currentDate = new Date();
+const currentYear = currentDate.getFullYear();
+const currentMonthIndex = currentDate.getMonth();
+const currentMonthPrefix = `${currentYear}-${String(currentMonthIndex + 1).padStart(2, '0')}`;
+
+const currentMonthDailyMap: Record<string, number> = {};
+
+books.forEach((b) => {
+  b.logs?.forEach((l) => {
+    if (l.date && l.date.startsWith(currentMonthPrefix)) {
+      currentMonthDailyMap[l.date] = (currentMonthDailyMap[l.date] || 0) + l.pagesRead;
+    }
+  });
+});
+---
+
+<Layout title="Home | Reading Hub">
+  <main class="home-container">
+    
+    <!-- Hero Section: Currently Reading -->
+    <section class="hero-section">
+      <div class="section-header">
+        <h2>📖 Currently Reading</h2>
+        <a href="/books" class="link-more">View All Books →</a>
+      </div>
+
+      {currentlyReading.length > 0 ? (
+        <div class="reading-grid">
+          {currentlyReading.map((b) => {
+            const progressPct = b.totalPages ? Math.round(((b.currentPage || 0) / b.totalPages) * 100) : null;
+            return (
+              <div class="now-reading-card">
+                <a href={`/books/${b.id}`} class="card-cover-link">
+                  <img src={b.coverUrl} alt={b.title} class="card-cover" loading="lazy" width="75" height="110" />
+                </a>
+                <div class="card-info">
+                  <h3><a href={`/books/${b.id}`}>{b.title}</a></h3>
+                  <p class="author">by {b.author}</p>
+                  
+                  {progressPct !== null && (
+                    <div class="progress-container">
+                      <div class="progress-bar" style={`width: ${progressPct}%`}></div>
+                      <span class="progress-text">{b.currentPage} / {b.totalPages} p. ({progressPct}%)</span>
+                    </div>
+                  )}
+
+                  {b.dateStarted && <span class="meta-started">Started: {b.dateStarted}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p class="empty-state">Not actively reading anything right now. Pick a book from your library!</p>
+      )}
+    </section>
+
+    <!-- Lifetime Stats Banner -->
+    <section class="lifetime-banner">
+      <div class="stat-pill">
+        <span class="stat-value">{finishedCount}</span>
+        <span class="stat-label">Books Finished</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-pill">
+        <span class="stat-value">{lifetimePages.toLocaleString()}</span>
+        <span class="stat-label">Lifetime Pages Read</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-pill">
+        <span class="stat-value">{lifetimeAvgRating} ★</span>
+        <span class="stat-label">Average Rating</span>
+      </div>
+    </section>
+
+    <!-- Current Month Snapshot -->
+    <section class="month-snapshot">
+      <div class="section-header">
+        <h2>🗓️ Current Month Snapshot</h2>
+        <a href="/history" class="link-more">Detailed Stats & History →</a>
+      </div>
+
+      <div class="snapshot-grid">
+        <div class="card">
+          <h3>Daily Pages Read</h3>
+          <canvas id="homeMonthChart"></canvas>
+        </div>
+
+        <div class="card">
+          <Calendar 
+            books={books} 
+            year={currentYear} 
+            month={currentMonthIndex} 
+            selectedBookId="all" 
+          />
+        </div>
+      </div>
+    </section>
+
+  </main>
+</Layout>
+
+<script is:inline src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script is:inline define:vars={{ currentMonthDailyMap }}>
+  const canvasEl = document.getElementById('homeMonthChart');
+  if (canvasEl) {
+    const ctx = canvasEl.getContext('2d');
+    const labels = Object.keys(currentMonthDailyMap).sort();
+    const data = labels.map(k => currentMonthDailyMap[k]);
+
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels.map(d => d.slice(8)),
+        datasets: [{ label: 'Pages Read', data, backgroundColor: '#0284c7', borderRadius: 4 }]
+      },
+      options: { 
+        responsive: true, 
+        scales: { y: { beginAtZero: true } },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+</script>
+
+<style>
+  .home-container { max-width: 1050px; margin: 0 auto; padding: 2rem 1rem 4rem; display: flex; flex-direction: column; gap: 2.5rem; }
+  
+  .section-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem; }
+  .section-header h2 { font-size: 1.4rem; color: var(--heading-text); margin: 0; }
+  .link-more { font-size: 0.85rem; color: var(--primary); text-decoration: none; font-weight: 600; }
+  .link-more:hover { text-decoration: underline; }
+
+  /* Currently Reading Cards */
+  .reading-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem; }
+  .now-reading-card { display: flex; gap: 1rem; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
+  
+  .card-cover-link { display: block; flex-shrink: 0; }
+  .card-cover { width: 75px; height: 110px; object-fit: cover; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.12); transition: opacity 0.15s ease; }
+  .card-cover:hover { opacity: 0.85; }
+
+  .card-info { display: flex; flex-direction: column; justify-content: center; flex: 1; }
+  .now-reading-card .card-info h3 { margin: 0; font-size: 1.1rem; }
+  .now-reading-card .card-info h3 a { color: var(--text) !important; text-decoration: none; }
+  .now-reading-card .card-info h3 a:hover { color: var(--primary) !important; text-decoration: underline; }
+
+  .author { font-size: 0.85rem; color: var(--text); opacity: 0.7; margin: 0.2rem 0 0.8rem; }
+  
+  .progress-container { background: var(--border); border-radius: 6px; height: 16px; position: relative; overflow: hidden; }
+  .progress-bar { background: var(--primary); height: 100%; transition: width 0.3s ease; }
+  .progress-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: 700; color: var(--text); }
+  .meta-started { font-size: 0.75rem; color: var(--text); opacity: 0.6; margin-top: 0.5rem; }
+
+  /* Lifetime Stats Banner */
+  .lifetime-banner { display: flex; justify-content: space-around; align-items: center; background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15); flex-wrap: wrap; gap: 1rem; }
+  .stat-pill { text-align: center; }
+  .stat-value { display: block; font-size: 1.8rem; font-weight: 800; }
+  .stat-label { font-size: 0.8rem; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-divider { width: 1px; height: 35px; background: rgba(255, 255, 255, 0.2); }
+
+  /* Snapshot Grid - Responsive Collapse */
+  .snapshot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; }
+  .card { background: var(--card-bg); border: 1px solid var(--border); padding: 1.25rem; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .card h3 { font-size: 1.0rem; color: var(--text); opacity: 0.8; margin: 0 0 1rem; }
+
+  .empty-state { color: var(--text); opacity: 0.7; font-style: italic; }
+</style>
