@@ -28,16 +28,10 @@ export interface Book {
   logs: DailyLog[];
 }
 
-const DATA_DIR = path.resolve('./src/data/books');
+const DATA_DIR = path.resolve('./public/data/books');
 const IS_NETLIFY = process.env.NETLIFY === 'true' || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
 
-// Use Vite/Astro glob import safely with explicit default import extraction
-const bookModules = (typeof import.meta !== 'undefined' && typeof import.meta.glob === 'function')
-  ? import.meta.glob<{ default: Book[] }>('../data/books/*.json', { eager: true, import: 'default' })
-  : {};
-
 async function ensureDirectoryExists(): Promise<void> {
-  if (IS_NETLIFY) return;
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
   } catch {
@@ -45,25 +39,8 @@ async function ensureDirectoryExists(): Promise<void> {
   }
 }
 
-// Reads all yearly JSON files (used locally or as a fast static production baseline)
-function readLocalBackupSync(): Book[] {
-  const allBooks: Book[] = [];
-  
-  for (const path in bookModules) {
-    const books = bookModules[path];
-    if (Array.isArray(books)) {
-      allBooks.push(...books);
-    }
-  }
-  
-  return allBooks;
-}
-
+// Reads all yearly JSON files directly from disk (works locally and for public assets bundled in Netlify serverless)
 async function readLocalBackup(): Promise<Book[]> {
-  if (IS_NETLIFY) {
-    return readLocalBackupSync();
-  }
-
   try {
     await ensureDirectoryExists();
     const files = await fs.readdir(DATA_DIR);
@@ -73,7 +50,9 @@ async function readLocalBackup(): Promise<Book[]> {
     for (const file of jsonFiles) {
       const raw = await fs.readFile(path.join(DATA_DIR, file), 'utf-8');
       const books = JSON.parse(raw) as Book[];
-      allBooks.push(...books);
+      if (Array.isArray(books)) {
+        allBooks.push(...books);
+      }
     }
     return allBooks;
   } catch (err) {
@@ -82,10 +61,8 @@ async function readLocalBackup(): Promise<Book[]> {
   }
 }
 
-// Writes an individual book back to its specific yearly JSON file (Local development only)
+// Writes an individual book back to its specific yearly JSON file
 async function writeLocalBackup(book: Book): Promise<void> {
-  if (IS_NETLIFY) return;
-
   await ensureDirectoryExists();
   const year = book.dateStarted ? new Date(book.dateStarted).getFullYear() : new Date().getFullYear();
   const filePath = path.join(DATA_DIR, `${year}.json`);
@@ -108,10 +85,8 @@ async function writeLocalBackup(book: Book): Promise<void> {
   await fs.writeFile(filePath, JSON.stringify(yearBooks, null, 2), 'utf-8');
 }
 
-// Removes a book from its yearly JSON file backup (Local development only)
+// Removes a book from its yearly JSON file backup
 async function removeLocalBackup(id: string): Promise<void> {
-  if (IS_NETLIFY) return;
-
   try {
     await ensureDirectoryExists();
     const files = await fs.readdir(DATA_DIR);
@@ -150,17 +125,17 @@ export async function getAllBooks(): Promise<Book[]> {
     }
 
     // 2. Cold Start Bootstrap: If the master catalog doesn't exist in blobs yet, 
-    // load the bundled yearly files, initialize the master catalog, and return them.
-    const initialBooks = readLocalBackupSync();
-    console.log(`Cold start bootstrap: Found ${initialBooks.length} books in local bundles.`);
+    // load the public backup files via filesystem, initialize the master catalog, and return them.
+    const initialBooks = await readLocalBackup();
+    console.log(`Cold start bootstrap: Found ${initialBooks.length} books in public/data/books/`);
     
     if (initialBooks.length > 0) {
       await store.setJSON('master-catalog.json', initialBooks);
     }
     return initialBooks;
   } catch (err) {
-    console.warn('Blobs store unavailable. Using bundled backup:', (err as Error).message);
-    return readLocalBackupSync();
+    console.warn('Blobs store unavailable. Using fallback backup:', (err as Error).message);
+    return await readLocalBackup();
   }
 }
 
