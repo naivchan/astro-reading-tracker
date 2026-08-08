@@ -32,6 +32,7 @@ const DATA_DIR = path.resolve('./public/data/books');
 const IS_NETLIFY = process.env.NETLIFY === 'true' || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
 
 async function ensureDirectoryExists(): Promise<void> {
+  if (IS_NETLIFY) return; // Never attempt to create directories on a read-only serverless filesystem
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
   } catch {
@@ -39,10 +40,9 @@ async function ensureDirectoryExists(): Promise<void> {
   }
 }
 
-// Reads all yearly JSON files directly from disk (works locally and for public assets bundled in Netlify serverless)
+// Reads all yearly JSON files directly from disk (used for local dev or Netlify cold-start bootstrap)
 async function readLocalBackup(): Promise<Book[]> {
   try {
-    await ensureDirectoryExists();
     const files = await fs.readdir(DATA_DIR);
     const jsonFiles = files.filter((f) => f.endsWith('.json'));
     const allBooks: Book[] = [];
@@ -61,8 +61,10 @@ async function readLocalBackup(): Promise<Book[]> {
   }
 }
 
-// Writes an individual book back to its specific yearly JSON file
+// Writes an individual book back to its specific yearly JSON file (Local development only)
 async function writeLocalBackup(book: Book): Promise<void> {
+  if (IS_NETLIFY) return; // Skip entirely on Netlify to prevent EROFS read-only errors
+
   await ensureDirectoryExists();
   const year = book.dateStarted ? new Date(book.dateStarted).getFullYear() : new Date().getFullYear();
   const filePath = path.join(DATA_DIR, `${year}.json`);
@@ -85,8 +87,10 @@ async function writeLocalBackup(book: Book): Promise<void> {
   await fs.writeFile(filePath, JSON.stringify(yearBooks, null, 2), 'utf-8');
 }
 
-// Removes a book from its yearly JSON file backup
+// Removes a book from its yearly JSON file backup (Local development only)
 async function removeLocalBackup(id: string): Promise<void> {
+  if (IS_NETLIFY) return; // Skip entirely on Netlify to prevent EROFS read-only errors
+
   try {
     await ensureDirectoryExists();
     const files = await fs.readdir(DATA_DIR);
@@ -146,7 +150,7 @@ export async function getBook(id: string): Promise<Book | null> {
 
 // SAVE: Updates the master catalog blob atomically
 export async function saveBook(book: Book): Promise<void> {
-  await writeLocalBackup(book);
+  await writeLocalBackup(book); // Only runs locally; safe on Netlify because of IS_NETLIFY check
 
   if (IS_NETLIFY) {
     try {
@@ -169,7 +173,7 @@ export async function saveBook(book: Book): Promise<void> {
 
 // DELETE: Removes the book from the master catalog blob atomically
 export async function deleteBook(id: string): Promise<void> {
-  await removeLocalBackup(id);
+  await removeLocalBackup(id); // Only runs locally; safe on Netlify because of IS_NETLIFY check
 
   if (IS_NETLIFY) {
     try {
