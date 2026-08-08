@@ -1,0 +1,46 @@
+[
+  {
+    "id": "public-sample-great-gatsby",
+    "slug": "the-great-gatsby",
+    "title": "The Great Gatsby",
+    "author": "F. Scott Fitzgerald",
+    "series": "",
+    "isbn": "9780743273565",
+    "coverUrl": "https://covers.openlibrary.org/b/isbn/9780743273565-L.jpg",
+    "format": "Ebook",
+    "totalPages": 180,
+    "currentPage": 180,
+    "status": "Finished",
+    "rating": 4,
+    "dateStarted": "2026-01-05",
+    "dateFinished": "2026-01-12",
+    "reviewUrl": "https://example.com/gatsby-review",
+    "logs": [
+      { "date": "2026-01-05", "pagesRead": 50 },
+      { "date": "2026-01-08", "pagesRead": 70 },
+      { "date": "2026-01-12", "pagesRead": 60 }
+    ]
+  },
+  {
+    "id": "public-sample-moby-dick",
+    "slug": "moby-dick",
+    "title": "Moby-Dick",
+    "author": "Herman Melville",
+    "series": "",
+    "isbn": "9781503280786",
+    "coverUrl": "https://covers.openlibrary.org/b/isbn/9781503280786-L.jpg",
+    "format": "Physical",
+    "totalPages": 635,
+    "currentPage": 340,
+    "status": "Reading",
+    "rating": null,
+    "dateStarted": "2026-06-01",
+    "reviewUrl": "",
+    "logs": [
+      { "date": "2026-06-01", "pagesRead": 75 },
+      { "date": "2026-06-05", "pagesRead": 90 },
+      { "date": "2026-06-12", "pagesRead": 85 },
+      { "date": "2026-06-20", "pagesRead": 90 }
+    ]
+  }
+]

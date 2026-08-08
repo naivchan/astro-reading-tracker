@@ -1,0 +1,27 @@
+[
+  {
+    "id": "public-sample-frankenstein",
+    "slug": "frankenstein",
+    "title": "Frankenstein",
+    "author": "Mary Shelley",
+    "series": "Gothic Classics",
+    "seriesNumber": 1,
+    "isbn": "9780486282114",
+    "coverUrl": "https://covers.openlibrary.org/b/isbn/9780486282114-L.jpg",
+    "format": "Ebook",
+    "totalPages": 280,
+    "currentPage": 280,
+    "status": "Finished",
+    "rating": 5,
+    "dateStarted": "2024-10-01",
+    "dateFinished": "2024-10-14",
+    "reviewUrl": "https://example.com/frankenstein-review",
+    "logs": [
+      { "date": "2024-10-01", "pagesRead": 45 },
+      { "date": "2024-10-03", "pagesRead": 60 },
+      { "date": "2024-10-07", "pagesRead": 75 },
+      { "date": "2024-10-10", "pagesRead": 50 },
+      { "date": "2024-10-14", "pagesRead": 50 }
+    ]
+  }
+]

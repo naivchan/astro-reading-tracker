@@ -1,0 +1,51 @@
+[
+  {
+    "id": "public-sample-pride",
+    "slug": "pride-and-prejudice",
+    "title": "Pride and Prejudice",
+    "author": "Jane Austen",
+    "series": "Classic Romance",
+    "seriesNumber": 1,
+    "isbn": "9780141439518",
+    "coverUrl": "https://covers.openlibrary.org/b/isbn/9780141439518-L.jpg",
+    "format": "Physical",
+    "totalPages": 432,
+    "currentPage": 432,
+    "status": "Finished",
+    "rating": 4.5,
+    "dateStarted": "2025-02-01",
+    "dateFinished": "2025-02-22",
+    "reviewUrl": "https://example.com/pride-and-prejudice-review",
+    "logs": [
+      { "date": "2025-02-01", "pagesRead": 60 },
+      { "date": "2025-02-05", "pagesRead": 80 },
+      { "date": "2025-02-10", "pagesRead": 92 },
+      { "date": "2025-02-15", "pagesRead": 100 },
+      { "date": "2025-02-22", "pagesRead": 100 }
+    ]
+  },
+  {
+    "id": "public-sample-dracula",
+    "slug": "dracula",
+    "title": "Dracula",
+    "author": "Bram Stoker",
+    "series": "Gothic Classics",
+    "seriesNumber": 2,
+    "isbn": "9780141439846",
+    "coverUrl": "https://covers.openlibrary.org/b/isbn/9780141439846-L.jpg",
+    "format": "Audiobook",
+    "totalPages": 488,
+    "currentPage": 488,
+    "status": "Finished",
+    "rating": 4,
+    "dateStarted": "2025-08-10",
+    "dateFinished": "2025-09-02",
+    "reviewUrl": "",
+    "logs": [
+      { "date": "2025-08-10", "pagesRead": 100 },
+      { "date": "2025-08-15", "pagesRead": 120 },
+      { "date": "2025-08-22", "pagesRead": 130 },
+      { "date": "2025-09-02", "pagesRead": 138 }
+    ]
+  }
+]
