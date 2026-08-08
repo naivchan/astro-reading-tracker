@@ -68,9 +68,8 @@ Add the following variables in your local `.env` file and your Netlify Site Sett
 
 * **`ADMIN_PASSWORD`**: The password required to unlock editing mode on your site.
 * **`GITHUB_TOKEN`**: The Personal Access Token you generated in Step 1.
-* **`GITHUB_REPO`**: The target repository formatted as `owner/repository-name` (e.g., `pomnavii/reading-backups`).
-* **`GITHUB_BRANCH`**: The branch name where backups should be committed (e.g., `main`).
-
+* **`GITHUB_REPO`**: The target repository formatted as `owner/repository-name` (e.g., `username/reading-backups`).
+* **`GITHUB_OWNER`**: Your github username
 ---
 
 ## 🚢 Deployment (Netlify)
