@@ -1,9 +1,6 @@
 ---
 // src/layouts/Layout.astro
 
-// Force Vite to bundle all book JSON files into the build graph
-const bookModules = import.meta.glob('../data/books/*.json', { eager: true });
-
 interface Props {
   title: string;
 }
@@ -43,7 +40,7 @@ const { title } = Astro.props;
 
     <footer class="site-footer">
       <div class="footer-content">
-        <a href="https://pomnavi.net" target="_blank" rel="noopener noreferrer">pomnavi.net</a>
+        <a href="https://github.com/naivchan/astro-reading-tracker/" target="_blank" rel="noopener noreferrer">GITHUB REPO</a>
       </div>
     </footer>
 
