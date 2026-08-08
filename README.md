@@ -85,3 +85,12 @@ Add the following variables in your local `.env` file and your Netlify Site Sett
 4. Go to **Site settings > Environment variables** and add all your required variables (`ADMIN_PASSWORD`, `GITHUB_TOKEN`, `GITHUB_REPO`, `GITHUB_BRANCH`).
 5. Click **Deploy site**!
 
+---
+## 🔑 Demo & Test Credentials
+
+You can test this project out at 
+
+* **Demo Password:** `demoreadingtracker`
+
+Make sure to change this to a secure, private password via your environment variables if you are setting up your own personal tracker!
+
