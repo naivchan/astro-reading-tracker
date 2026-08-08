@@ -39,9 +39,9 @@ Create a `.env` file in the root of your project for local development (or confi
 
 ```env
 ADMIN_PASSWORD=your_secure_admin_password_here
-GITHUB_TOKEN=your_personal_access_token_here
+GITHUB_OWNER=your-username
 GITHUB_REPO=your-username/your-backup-repo-name
-GITHUB_BRANCH=main
+GITHUB_TOKEN=your_personal_access_token_here
 
 ```
 
