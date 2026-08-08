@@ -28,7 +28,7 @@ export interface Book {
   logs: DailyLog[];
 }
 
-const DATA_DIR = path.resolve('./data/books');
+const DATA_DIR = path.resolve('./src/data/books');
 const IS_NETLIFY = process.env.NETLIFY === 'true' || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
 
 // Use Vite/Astro glob import safely only if import.meta exists and has glob (prevents serverless runtime crash)
@@ -48,12 +48,10 @@ async function ensureDirectoryExists(): Promise<void> {
 // Reads all yearly JSON files (used locally or as a fast static production baseline)
 function readLocalBackupSync(): Book[] {
   const allBooks: Book[] = [];
-  if (IS_NETLIFY) {
-    for (const path in bookModules) {
-      const module = bookModules[path];
-      if (module && module.default) {
-        allBooks.push(...module.default);
-      }
+  for (const path in bookModules) {
+    const module = bookModules[path];
+    if (module && module.default) {
+      allBooks.push(...module.default);
     }
   }
   return allBooks;
