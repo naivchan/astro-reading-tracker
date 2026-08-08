@@ -33,7 +33,7 @@ const IS_NETLIFY = process.env.NETLIFY === 'true' || Boolean(process.env.AWS_LAM
 
 // Use Vite/Astro glob import safely only if import.meta exists and has glob (prevents serverless runtime crash)
 const bookModules = (typeof import.meta !== 'undefined' && typeof import.meta.glob === 'function')
-  ? import.meta.glob<{ default: Book[] }>('../../data/books/*.json', { eager: true })
+  ? import.meta.glob<{ default: Book[] }>('../data/books/*.json', { eager: true })
   : {};
 
 async function ensureDirectoryExists(): Promise<void> {

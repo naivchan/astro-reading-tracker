@@ -30,7 +30,7 @@ export async function syncYearlyBackupToGitHub(year: number, books: Book[]): Pro
     return;
   }
 
-  const filePath = `data/books/${year}.json`;
+  const filePath = `src/data/books/${year}.json`;
   const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${filePath}`;
 
   try {
