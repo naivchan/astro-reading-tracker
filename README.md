@@ -88,7 +88,7 @@ Add the following variables in your local `.env` file and your Netlify Site Sett
 ---
 ## 🔑 Demo & Test Credentials
 
-You can test this project out at 
+You can test this project out at https://astro-reading-tracker.netlify.app/
 
 * **Demo Password:** `demoreadingtracker`
 
