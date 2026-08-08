@@ -31,9 +31,9 @@ export interface Book {
 const DATA_DIR = path.resolve('./src/data/books');
 const IS_NETLIFY = process.env.NETLIFY === 'true' || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
 
-// Use Vite/Astro glob import safely only if import.meta exists and has glob (prevents serverless runtime crash)
+// Use Vite/Astro glob import safely with explicit default import extraction
 const bookModules = (typeof import.meta !== 'undefined' && typeof import.meta.glob === 'function')
-  ? import.meta.glob<{ default: Book[] }>('../data/books/*.json', { eager: true })
+  ? import.meta.glob<{ default: Book[] }>('../data/books/*.json', { eager: true, import: 'default' })
   : {};
 
 async function ensureDirectoryExists(): Promise<void> {
@@ -48,12 +48,14 @@ async function ensureDirectoryExists(): Promise<void> {
 // Reads all yearly JSON files (used locally or as a fast static production baseline)
 function readLocalBackupSync(): Book[] {
   const allBooks: Book[] = [];
+  
   for (const path in bookModules) {
-    const module = bookModules[path];
-    if (module && module.default) {
-      allBooks.push(...module.default);
+    const books = bookModules[path];
+    if (Array.isArray(books)) {
+      allBooks.push(...books);
     }
   }
+  
   return allBooks;
 }
 
@@ -150,6 +152,8 @@ export async function getAllBooks(): Promise<Book[]> {
     // 2. Cold Start Bootstrap: If the master catalog doesn't exist in blobs yet, 
     // load the bundled yearly files, initialize the master catalog, and return them.
     const initialBooks = readLocalBackupSync();
+    console.log(`Cold start bootstrap: Found ${initialBooks.length} books in local bundles.`);
+    
     if (initialBooks.length > 0) {
       await store.setJSON('master-catalog.json', initialBooks);
     }
